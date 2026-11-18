@@ -1,5 +1,7 @@
 import {
   Building2,
+  FileSpreadsheet,
+  ShieldCheck,
   CalendarDays,
   ClipboardList,
   LayoutDashboard,
@@ -32,6 +34,7 @@ const NAV: NavGroup[] = [
       { href: '/agenda', label: 'Agenda', icon: CalendarDays, permission: 'appointments:read' },
       { href: '/patients', label: 'Pacientes', icon: UserRound, permission: 'patients:read' },
       { href: '/cash', label: 'Caja', icon: Wallet, permission: 'account:read' },
+      { href: '/liquidations', label: 'Liquidaciones', icon: FileSpreadsheet, permission: 'liquidations:manage' },
       { href: '/professionals', label: 'Profesionales', icon: Stethoscope, permission: 'availability:manage' },
     ],
   },
@@ -41,6 +44,7 @@ const NAV: NavGroup[] = [
       { href: '/admin/users', label: 'Usuarios', icon: Users, permission: 'users:manage' },
       { href: '/admin/branches', label: 'Sedes', icon: Building2, permission: 'branches:manage' },
       { href: '/admin/practices', label: 'Prácticas', icon: ClipboardList, permission: 'practices:manage' },
+      { href: '/coverages', label: 'Coberturas', icon: ShieldCheck, permission: 'coverages:manage' },
     ],
   },
   {
