@@ -7,6 +7,7 @@ import { maintenanceGuard } from '../../src/middleware/maintenance.js'
 import { pgToolsAvailable } from '../../src/modules/backups/backups.archive.js'
 import {
   as,
+  ORIGIN,
   buildApp,
   loginAs,
   resetDb,
@@ -115,6 +116,9 @@ describe('backups: acceso y validaciones', () => {
     expect([bloqueada.status, codigo(bloqueada)]).toEqual([503, 'MAINTENANCE'])
     await request(prueba).get('/api/health').expect(200)
     await request(prueba).get('/api/backups/status').expect(200)
+    await request(prueba).get('/api/backups/status/extra').expect(503)
+    await request(prueba).get('/api/health-extra').expect(503)
+    await request(prueba).post('/api/health').expect(503)
     activo = false
     await request(prueba).get('/api/patients').expect(200)
   })
@@ -146,4 +150,64 @@ describe.skipIf(!herramientas)('backups: generar y restaurar de verdad', () => {
     await as(app, admin).get('/api/backups/status').expect(200)
     expect(await db.auditLog.count({ where: { action: 'BACKUP_RESTORED' } })).toBe(1)
   })
+  it('rejects concurrent backup starts and releases the lock after completion', async () => {
+    const attempts = await Promise.all([
+      as(app, admin).post('/api/backups'),
+      as(app, admin).post('/api/backups'),
+    ])
+    expect(attempts.map((res) => res.status).sort()).toEqual([202, 409])
+    const started = attempts.find((res) => res.status === 202)?.body as Backup
+    expect((await esperar(started.id)).status).toBe('SUCCEEDED')
+    const next = (await as(app, admin).post('/api/backups').expect(202)).body as Backup
+    expect((await esperar(next.id)).status).toBe('SUCCEEDED')
+  })
+
+  it('keeps maintenance after attachment failure and resumes the same restore', async () => {
+    const original = await seedPatient(db, seed, { firstName: 'Respaldo', lastName: 'Ficticio' })
+    await mkdir(TEST_FILES.dir, { recursive: true })
+    await writeFile(path.join(TEST_FILES.dir, 'synthetic'), 'saved attachment')
+    const started = (await as(app, admin).post('/api/backups').expect(202)).body as Backup
+    const backup = await esperar(started.id)
+    expect(backup.status).toBe('SUCCEEDED')
+    const changed = await seedPatient(db, seed, { firstName: 'Posterior', lastName: 'Ficticio', documentNumber: '40999888' })
+    expect(await db.patient.count()).toBe(2)
+
+    await rm(TEST_FILES.dir, { recursive: true, force: true })
+    await writeFile(TEST_FILES.dir, 'fixture blocking the attachment directory')
+    try {
+      const res = await as(app, admin).post(`/api/backups/${backup.id}/restore`, { confirmation: 'RESTAURAR' })
+      expect([res.status, codigo(res)]).toEqual([500, 'RESTORE_FAILED'])
+      expect(await db.patient.findUnique({ where: { id: changed.id } })).toBeNull()
+      expect(await db.patient.findUnique({ where: { id: original.id } })).not.toBeNull()
+      await expect(readFile(path.join(TEST_FILES.dir, 'synthetic'))).rejects.toMatchObject({ code: 'ENOTDIR' })
+      const status = await as(app, admin).get('/api/backups/status').expect(200)
+      expect(status.body).toMatchObject({ maintenance: true, running: null })
+      const marker = path.join(TEST_BACKUPS.dir, '.restore-pending.json')
+      expect(JSON.parse(await readFile(marker, 'utf8'))).toEqual({ id: backup.id })
+      expect(await readFile(path.join(TEST_BACKUPS.dir, `.restore-${backup.id}`, 'files', 'synthetic'), 'utf8')).toBe('saved attachment')
+      await as(app, admin).get('/api/patients').expect(503)
+      await as(app, admin).get('/api/health').expect(200)
+      await as(app, admin).post('/api/backups').expect(503)
+      await as(app, recepcion).post(`/api/backups/${backup.id}/restore`, { confirmation: 'RESTAURAR' }).expect(403)
+      await request(app).post(`/api/backups/${backup.id}/restore`).set('Origin', ORIGIN).send({ confirmation: 'RESTAURAR' }).expect(401)
+      const other = await as(app, admin).post('/api/backups/backup-20261020-030000-abcdef/restore', { confirmation: 'RESTAURAR' })
+      expect([other.status, codigo(other)]).toEqual([409, 'BACKUP_BUSY'])
+      expect(await db.auditLog.count({ where: { action: 'BACKUP_RESTORED' } })).toBe(0)
+    } finally {
+      await rm(TEST_FILES.dir, { force: true })
+      const recovered = await loginAs(app, 'admin')
+      const attempts = await Promise.all([
+        as(app, recovered).post(`/api/backups/${backup.id}/restore`, { confirmation: 'RESTAURAR' }),
+        as(app, recovered).post(`/api/backups/${backup.id}/restore`, { confirmation: 'RESTAURAR' }),
+      ])
+      expect(attempts.map((res) => res.status).sort()).toEqual([200, 409])
+    }
+    expect(await readFile(path.join(TEST_FILES.dir, 'synthetic'), 'utf8')).toBe('saved attachment')
+    await expect(readFile(path.join(TEST_BACKUPS.dir, '.restore-pending.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    const finalStatus = await as(app, admin).get('/api/backups/status').expect(200)
+    expect(finalStatus.body).toMatchObject({ maintenance: false, running: null })
+    await as(app, admin).get('/api/patients').expect(200)
+    expect(await db.auditLog.count({ where: { action: 'BACKUP_RESTORED' } })).toBe(1)
+  })
+
 })

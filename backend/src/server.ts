@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { createApp } from './app.js'
+import { initializeBackupRecovery } from './modules/backups/backups.service.js'
 import { startBackupScheduler } from './modules/backups/backups.scheduler.js'
 import { loadEnv } from './config/env.js'
 import type { Env } from './config/env.js'
@@ -25,6 +26,8 @@ const backups = {
   databaseUrl: env.DATABASE_URL,
   pgBinDir: env.PG_BIN_DIR,
 }
+
+await initializeBackupRecovery(backups)
 
 const app = createApp({
   db,

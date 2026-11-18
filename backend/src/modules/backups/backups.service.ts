@@ -16,7 +16,7 @@ import {
   unpack,
   type BackupConfig,
 } from './backups.archive.js'
-import { backupRecordSchema, type BackupCounts, type BackupRecord, type BackupStatusDto, type RestoreResultDto } from './backups.schemas.js'
+import { backupParamsSchema, backupRecordSchema, type BackupCounts, type BackupRecord, type BackupStatusDto, type RestoreResultDto } from './backups.schemas.js'
 import { backupsToDelete } from './domain/retention.js'
 
 interface Manifest {
@@ -33,9 +33,24 @@ interface Actor {
   displayName: string | null
 }
 
-const state = { maintenance: false, running: null as string | null, nextScheduled: null as string | null }
+const state = { maintenance: false, running: null as string | null, recoveryId: null as string | null, nextScheduled: null as string | null }
 
 export const maintenanceActive = () => state.maintenance
+
+const recoveryFile = (config: BackupConfig) => path.join(config.dir, '.restore-pending.json')
+
+export async function initializeBackupRecovery(config: BackupConfig): Promise<void> {
+  let content: string
+  try {
+    content = await readFile(recoveryFile(config), 'utf8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw err
+  }
+  const { id } = backupParamsSchema.parse(JSON.parse(content))
+  state.maintenance = true
+  state.recoveryId = id
+}
 
 export function setNextScheduled(value: Date | null) {
   state.nextScheduled = value ? value.toISOString() : null
@@ -204,9 +219,6 @@ export async function startBackup(
   kind: BackupRecord['kind'],
 ): Promise<{ record: BackupRecord; done: Promise<BackupRecord> }> {
   assertIdle()
-  await assertMatchingTools(db, config)
-  await mkdir(config.dir, { recursive: true })
-  const context = await contextOf(db)
   const now = new Date()
   const record: BackupRecord = {
     id: newId(now),
@@ -223,13 +235,16 @@ export async function startBackup(
   }
   state.running = record.id
   try {
+    await assertMatchingTools(db, config)
+    await mkdir(config.dir, { recursive: true })
+    const context = await contextOf(db)
     await writeRecord(config, record)
     await audit(db, context, actor, { action: 'BACKUP_STARTED', entityId: record.id, metadata: { tipo: kind } })
+    return { record, done: runBackup(db, config, logger, context, actor, record) }
   } catch (err) {
     state.running = null
     throw err
   }
-  return { record, done: runBackup(db, config, logger, context, actor, record) }
 }
 
 let tools: Promise<boolean> | null = null
@@ -256,6 +271,24 @@ async function replaceFiles(source: string, target: string) {
   await cp(source, target, { recursive: true })
 }
 
+async function verifyFiles(source: string, target: string): Promise<void> {
+  const entries = (await readdir(source)).sort()
+  if (JSON.stringify(entries) !== JSON.stringify((await readdir(target)).sort())) {
+    throw new AppError(500, 'RESTORE_VERIFICATION_FAILED', 'Los archivos restaurados no coinciden con el backup')
+  }
+  for (const entry of entries) {
+    const saved = path.join(source, entry)
+    const restored = path.join(target, entry)
+    const info = await stat(saved)
+    const restoredInfo = await stat(restored)
+    if (info.isDirectory() && restoredInfo.isDirectory()) {
+      await verifyFiles(saved, restored)
+    } else if (!info.isFile() || !restoredInfo.isFile() || (await fileDigest(saved)).sha256 !== (await fileDigest(restored)).sha256) {
+      throw new AppError(500, 'RESTORE_VERIFICATION_FAILED', 'Los archivos restaurados no coinciden con el backup')
+    }
+  }
+}
+
 export async function restoreBackup(
   db: Db,
   config: BackupConfig,
@@ -263,18 +296,21 @@ export async function restoreBackup(
   actor: Actor & { sessionId: string },
   id: string,
 ): Promise<RestoreResultDto> {
-  assertIdle()
-  const { record, file: archive } = await succeededOrFail(config, id)
-  const context = await contextOf(db)
-  const digest = await fileDigest(archive).catch(() => null)
-  if (digest?.sha256 !== record.sha256) throw new AppError(422, 'BACKUP_CORRUPT', 'El archivo del backup está dañado o no coincide con su registro')
-  if (record.schemaVersion !== (await schemaVersion(db))) {
-    throw new AppError(422, 'SCHEMA_MISMATCH', 'El backup es de otra versión del sistema y no se puede restaurar en esta')
+  if (state.running || (state.maintenance && state.recoveryId !== id)) {
+    throw new AppError(409, 'BACKUP_BUSY', 'Ya hay un backup o una restauración en curso')
   }
-
-  const work = path.join(config.dir, `.restore-${id}`)
   state.running = id
+  const work = path.join(config.dir, `.restore-${id}`)
   try {
+    const { record, file: archive } = await succeededOrFail(config, id)
+    const context = await contextOf(db)
+    const digest = await fileDigest(archive).catch(() => null)
+    if (digest?.sha256 !== record.sha256) throw new AppError(422, 'BACKUP_CORRUPT', 'El archivo del backup está dañado o no coincide con su registro')
+    if (record.schemaVersion !== (await schemaVersion(db))) {
+      throw new AppError(422, 'SCHEMA_MISMATCH', 'El backup es de otra versión del sistema y no se puede restaurar en esta')
+    }
+
+    await assertMatchingTools(db, config)
     await rm(work, { recursive: true, force: true })
     await mkdir(path.join(work, 'files'), { recursive: true })
     await unpack(archive, work)
@@ -287,10 +323,15 @@ export async function restoreBackup(
     await unpack(path.join(work, 'files.tar'), path.join(work, 'files'))
     const session = await db.session.findUnique({ where: { id: actor.sessionId } })
 
+    if (state.recoveryId === null) {
+      await writeFile(recoveryFile(config), JSON.stringify({ id }), { flag: 'wx', mode: 0o600 })
+      state.recoveryId = id
+    }
     state.maintenance = true
     logger.warn({ backup: id }, 'restauracion iniciada: sistema en mantenimiento')
     await restoreDatabase(config, path.join(work, 'database.dump'))
     await replaceFiles(path.join(work, 'files'), config.filesDir)
+    await verifyFiles(path.join(work, 'files'), config.filesDir)
 
     const counts = await databaseCounts(db)
     if (JSON.stringify(counts) !== JSON.stringify(manifest.counts)) {
@@ -304,6 +345,9 @@ export async function restoreBackup(
     }
     const restoredAt = new Date().toISOString()
     await audit(db, context, actor, { action: 'BACKUP_RESTORED', entityId: id, metadata: { backup: id } })
+    await rm(recoveryFile(config))
+    state.recoveryId = null
+    state.maintenance = false
     logger.warn({ backup: id }, 'restauracion terminada')
     return { id, restoredAt, counts }
   } catch (err) {
@@ -311,8 +355,9 @@ export async function restoreBackup(
     logger.error({ err, backup: id }, 'fallo la restauracion')
     throw new AppError(500, 'RESTORE_FAILED', 'No se pudo completar la restauración del backup')
   } finally {
-    state.maintenance = false
     state.running = null
-    await rm(work, { recursive: true, force: true })
+    if (!state.maintenance) {
+      await rm(work, { recursive: true, force: true }).catch((err: unknown) => logger.error({ err, backup: id }, 'no se pudo limpiar la restauracion'))
+    }
   }
 }
