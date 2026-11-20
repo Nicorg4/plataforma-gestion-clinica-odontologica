@@ -3773,6 +3773,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+        "429":
+          description: Demasiados intentos fallidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
   /api/auth/preferences:
     put:
       tags:
@@ -4284,7 +4290,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
         "409":
-          description: Es la única sede activa
+          description: Es la única sede activa o tiene turnos pendientes
           content:
             application/json:
               schema:
@@ -5446,7 +5452,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
         "409":
-          description: El pago ya estaba anulado
+          description: El pago ya estaba anulado o su saldo a favor ya se usó en otro cobro
           content:
             application/json:
               schema:

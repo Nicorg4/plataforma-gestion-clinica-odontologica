@@ -162,6 +162,50 @@ describe('edicion de usuarios y roles', () => {
   it('rechaza una edicion vacia', async () => {
     expect((await as(app, admin).patch(`/api/users/${admin.userId}`, {})).status).toBe(400)
   })
+
+  it('dos administradores que se quitan el rol a la vez no dejan al sistema sin administradores', async () => {
+    const otro = await seedUser(db, seed, { username: 'admin2', roles: ['ADMIN'] })
+    const segundo = await loginAs(app, 'admin2')
+    const comoRecepcion = { roles: ['RECEPTIONIST'], branchIds: [seed.branchId] }
+    for (let intento = 0; intento < 5; intento += 1) {
+      await db.userRole.deleteMany({ where: { userId: { in: [admin.userId, otro.id] } } })
+      await db.userRole.createMany({ data: [admin.userId, otro.id].map((userId) => ({ userId, role: 'ADMIN' as const })) })
+      const [a, b] = await Promise.all([
+        as(app, admin).patch(`/api/users/${otro.id}`, comoRecepcion),
+        as(app, segundo).patch(`/api/users/${admin.userId}`, comoRecepcion),
+      ])
+      expect([a.status, b.status].sort()).toEqual([200, 409])
+      expect(await db.userRole.count({ where: { role: 'ADMIN' } })).toBe(1)
+    }
+  })
+
+  it('concurrent profile and role updates keep both changes', async () => {
+    const other = await seedUser(db, seed, { username: 'admin2', roles: ['ADMIN'] })
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await db.userRole.deleteMany({ where: { userId: other.id } })
+      await db.userRole.create({ data: { userId: other.id, role: 'ADMIN' } })
+      const displayName = `Updated administrator ${attempt}`
+      const results = await Promise.all([
+        as(app, admin).patch(`/api/users/${other.id}`, { displayName }),
+        as(app, admin).patch(`/api/users/${other.id}`, { roles: ['RECEPTIONIST'], branchIds: [seed.branchId] }),
+      ])
+      expect(results.map((res) => res.status)).toEqual([200, 200])
+      const user = await db.user.findUniqueOrThrow({ where: { id: other.id }, include: { roles: true } })
+      expect(user.displayName).toBe(displayName)
+      expect(user.roles.map((role) => role.role)).toEqual(['RECEPTIONIST'])
+    }
+  })
+
+  it('dos administradores que se desactivan a la vez no dejan al sistema sin administradores', async () => {
+    const otro = await seedUser(db, seed, { username: 'admin2', roles: ['ADMIN'] })
+    const segundo = await loginAs(app, 'admin2')
+    const [a, b] = await Promise.all([
+      as(app, admin).post(`/api/users/${otro.id}/deactivate`),
+      as(app, segundo).post(`/api/users/${admin.userId}/deactivate`),
+    ])
+    expect([a.status, b.status]).toContain(200)
+    expect(await db.user.count({ where: { active: true, roles: { some: { role: 'ADMIN' } } } })).toBe(1)
+  })
 })
 
 describe('contraseña, baja y sesiones', () => {

@@ -157,9 +157,47 @@ describe('superposicion de turnos', () => {
 
   it('con dos pedidos simultaneos al mismo horario solo uno se crea', async () => {
     const enviar = () => as(app, recepcion).post('/api/appointments', turno())
-    const [a, b] = await Promise.all([enviar(), enviar()])
-    expect([a.status, b.status].sort()).toEqual([201, 409])
-    expect(await db.appointment.count()).toBe(1)
+    for (let intento = 0; intento < 8; intento += 1) {
+      await db.appointment.deleteMany()
+      const [a, b] = await Promise.all([enviar(), enviar()])
+      expect([a.status, b.status].sort()).toEqual([201, 409])
+      expect(codigo(a.status === 409 ? a : b)).toBe('APPOINTMENT_CONFLICT')
+      expect(await db.appointment.count()).toBe(1)
+      expect(await db.auditLog.count({ where: { action: 'APPOINTMENT_CREATED' } })).toBe(intento + 1)
+    }
+  })
+
+  it('concurrent rescheduling keeps only one appointment in the requested slot', async () => {
+    const base = { patientId: paciente.id, professionalId: perfilA, createdById: adminId }
+    const first = await seedAppointment(db, seed, { ...base, startsAt: dia(10), endsAt: dia(11) })
+    const second = await seedAppointment(db, seed, { ...base, startsAt: dia(11), endsAt: dia(12) })
+    const slot = { startsAt: iso(dia(15)), endsAt: iso(dia(16)) }
+    const results = await Promise.all([
+      as(app, recepcion).patch(`/api/appointments/${first.id}`, slot),
+      as(app, recepcion).patch(`/api/appointments/${second.id}`, slot),
+    ])
+    expect(results.map((res) => res.status).sort()).toEqual([200, 409])
+    expect(results.find((res) => res.status === 409)?.body).toMatchObject({ error: { code: 'APPOINTMENT_CONFLICT' } })
+    expect(await db.appointment.count({ where: { startsAt: dia(15), endsAt: dia(16) } })).toBe(1)
+    expect(await db.appointment.count()).toBe(2)
+  })
+
+  it('concurrent reactivation keeps only one active appointment in the slot', async () => {
+    const data = {
+      patientId: paciente.id, professionalId: perfilA, createdById: adminId,
+      startsAt: dia(15), endsAt: dia(16), status: 'CANCELLED' as const,
+    }
+    const first = await seedAppointment(db, seed, data)
+    const second = await seedAppointment(db, seed, data)
+    const results = await Promise.all([
+      as(app, recepcion).post(`/api/appointments/${first.id}/reactivate`, {}),
+      as(app, recepcion).post(`/api/appointments/${second.id}/reactivate`, {}),
+    ])
+    expect(results.map((res) => res.status).sort()).toEqual([200, 409])
+    expect(results.find((res) => res.status === 409)?.body).toMatchObject({ error: { code: 'APPOINTMENT_CONFLICT' } })
+    expect(await db.appointment.count({ where: { status: 'SCHEDULED' } })).toBe(1)
+    expect(await db.appointment.count({ where: { status: 'CANCELLED' } })).toBe(1)
+    expect(await db.auditLog.count({ where: { action: 'APPOINTMENT_STATUS_CHANGED' } })).toBe(1)
   })
 
   it('cancelar libera el horario y conserva el turno', async () => {

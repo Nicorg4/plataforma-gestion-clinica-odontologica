@@ -72,6 +72,17 @@ export async function updateBranch(
       if (otherActive === 0) {
         throw new AppError(409, 'LAST_BRANCH', 'No se puede desactivar la única sede activa')
       }
+      const pending = await tx.appointment.count({
+        where: { branchId: id, status: { in: ['SCHEDULED', 'CONFIRMED'] }, endsAt: { gt: new Date() } },
+      })
+      if (pending > 0) {
+        throw new AppError(
+          409,
+          'BRANCH_HAS_APPOINTMENTS',
+          `La sede tiene ${pending === 1 ? 'un turno pendiente' : `${pending} turnos pendientes`}: reprogramalos en otra sede o cancelalos antes de desactivarla`,
+          { appointments: pending },
+        )
+      }
     }
 
     const updated = await tx.branch.update({

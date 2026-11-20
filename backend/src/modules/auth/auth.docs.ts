@@ -100,6 +100,7 @@ export function registerAuthDocs(registry: OpenAPIRegistry): void {
       401: unauthenticated,
       403: forbidden,
       422: errorResponse('Contraseña actual incorrecta, igual a la actual o que no cumple los requisitos'),
+      429: errorResponse('Demasiados intentos fallidos'),
     },
   })
 
