@@ -1,3 +1,4 @@
+import type { Prisma } from '../../generated/prisma/client.js'
 import type { Db } from '../../shared/db.js'
 import { AppError } from '../../shared/errors.js'
 import { hashPassword } from '../../shared/password.js'
@@ -36,6 +37,10 @@ function assertBranchRule(roles: readonly Role[], branchIds: readonly string[]):
   if (requiresBranch(roles) && branchIds.length === 0) {
     throw new AppError(422, 'BRANCH_REQUIRED', 'Este usuario necesita al menos una sede asignada')
   }
+}
+
+async function lockOrganization(tx: Prisma.TransactionClient, organizationId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM "Organization" WHERE id = ${organizationId}::uuid FOR NO KEY UPDATE`
 }
 
 async function loadOrFail(db: Pick<Db, 'user'>, organizationId: string, id: string) {
@@ -100,6 +105,7 @@ export async function updateUser(
   input: UpdateUserInput,
 ): Promise<UserDto> {
   await db.$transaction(async (tx) => {
+    if (input.roles) await lockOrganization(tx, actor.organizationId)
     const user = await loadOrFail(tx, actor.organizationId, id)
     const currentRoles = user.roles.map((r) => r.role)
     const nextRoles = input.roles ? [...new Set(input.roles)] : currentRoles
@@ -180,6 +186,7 @@ export async function resetPassword(
 
 export async function deactivateUser(db: Db, actor: AuthContext, id: string): Promise<UserDto> {
   await db.$transaction(async (tx) => {
+    await lockOrganization(tx, actor.organizationId)
     const user = await loadOrFail(tx, actor.organizationId, id)
     if (user.id === actor.userId) {
       throw new AppError(409, 'CANNOT_DEACTIVATE_SELF', 'No podés desactivar tu propio usuario')
