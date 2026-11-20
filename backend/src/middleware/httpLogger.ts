@@ -19,7 +19,7 @@ export function httpLogger(logger: Logger) {
       req: (req: { id: unknown; method: string; url: string }) => ({
         id: req.id,
         method: req.method,
-        url: req.url,
+        url: req.url.split('?')[0],
       }),
       res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
     },
