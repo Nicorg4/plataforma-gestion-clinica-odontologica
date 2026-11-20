@@ -54,7 +54,7 @@ export function registerBranchesDocs(registry: OpenAPIRegistry): void {
       200: json(branchSchema, 'Sede actualizada'),
       400: invalidInput,
       404: notFound,
-      409: errorResponse('Es la única sede activa'),
+      409: errorResponse('Es la única sede activa o tiene turnos pendientes'),
       ...common,
     },
   })

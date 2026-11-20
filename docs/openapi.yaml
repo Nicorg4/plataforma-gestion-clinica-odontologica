@@ -4290,7 +4290,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
         "409":
-          description: Es la única sede activa
+          description: Es la única sede activa o tiene turnos pendientes
           content:
             application/json:
               schema:
