@@ -626,6 +626,16 @@ export async function voidPayment(
     if (!payment) throw new AppError(404, 'NOT_FOUND', 'El pago no existe')
     if (payment.voidedAt) throw new AppError(409, 'ALREADY_VOIDED', 'El pago ya está anulado')
     assertVoidAllowed(viewer, 'payments:void', payment.createdAt)
+    const usedAsCredit = await tx.paymentAllocation.findFirst({
+      where: { paymentId, creditApplication: { is: { voidedAt: null } } },
+    })
+    if (usedAsCredit) {
+      throw new AppError(
+        409,
+        'CREDIT_IN_USE',
+        'Parte de este pago se usó como saldo a favor en otro cobro: anulá primero ese uso de saldo a favor',
+      )
+    }
     const voided = await tx.payment.update({
       where: { id: paymentId },
       data: { voidedAt: new Date(), voidReason: reason, voidedById: actor.userId },

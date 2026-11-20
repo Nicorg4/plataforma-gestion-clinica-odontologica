@@ -5452,7 +5452,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
         "409":
-          description: El pago ya estaba anulado
+          description: El pago ya estaba anulado o su saldo a favor ya se usó en otro cobro
           content:
             application/json:
               schema:
