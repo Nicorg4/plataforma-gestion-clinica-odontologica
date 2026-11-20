@@ -40,12 +40,16 @@ const pendientes = async () =>
   )
 
 async function turno(status: 'ATTENDED' | 'CANCELLED' | 'NO_SHOW' | 'SCHEDULED', desde = -120, duracion = 30) {
+  const nextDay = new Date()
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1)
+  nextDay.setUTCHours(15, 0, 0, 0)
+  const startsAt = desde > 0 ? new Date(nextDay.getTime() + desde * 60_000) : minutesFromNow(desde)
   return seedAppointment(db, seed, {
     patientId: pacienteId,
     professionalId: perfilId,
     createdById: recepcionId,
-    startsAt: minutesFromNow(desde),
-    endsAt: minutesFromNow(desde + duracion),
+    startsAt,
+    endsAt: new Date(startsAt.getTime() + duracion * 60_000),
     status,
   })
 }

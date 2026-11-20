@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { publicRoute, requireAuth } from '../../middleware/access.js'
-import { loginRateLimiter, type LoginRateLimit } from '../../middleware/rateLimit.js'
+import { loginRateLimiter, passwordChangeRateLimiter, type LoginRateLimit } from '../../middleware/rateLimit.js'
 import type { Db } from '../../shared/db.js'
 import { authController } from './auth.controller.js'
 
@@ -18,7 +18,7 @@ export function authRouter({ db, cookieSecure, loginRateLimit }: Deps): Router {
   router.post('/login', publicRoute(), loginRateLimiter(loginRateLimit), c.login)
   router.post('/logout', pending, c.logout)
   router.get('/me', pending, c.me)
-  router.post('/change-password', pending, c.changePassword)
+  router.post('/change-password', pending, passwordChangeRateLimiter(loginRateLimit), c.changePassword)
   router.post('/onboarding/complete', requireAuth(), c.completeOnboarding)
   router.put('/preferences', requireAuth(), c.savePreferences)
   return router

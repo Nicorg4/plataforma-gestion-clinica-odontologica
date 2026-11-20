@@ -138,7 +138,7 @@ export function registerBillingDocs(registry: OpenAPIRegistry): void {
       200: json(paymentSchema, 'Pago anulado'),
       400: invalidInput,
       404: notFound,
-      409: errorResponse('El pago ya estaba anulado'),
+      409: errorResponse('El pago ya estaba anulado o su saldo a favor ya se usó en otro cobro'),
       ...common,
     },
   })

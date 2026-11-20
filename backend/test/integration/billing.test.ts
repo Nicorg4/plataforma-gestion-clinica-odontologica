@@ -428,6 +428,22 @@ describe('anular un uso de saldo a favor', () => {
     expect(await db.auditLog.count({ where: { action: 'CREDIT_VOIDED' } })).toBe(1)
     await expect(db.creditApplication.delete({ where: { id: uso.id } })).rejects.toThrow()
   })
+
+  it('no se anula un pago cuyo saldo a favor ya se uso, hasta anular ese uso', async () => {
+    await registrar(consulta)
+    const pago = await pagar('12000')
+    await registrar(consulta)
+    await as(app, recepcion).post(pagos(), { credit: '2000' }).expect(201)
+    const bloqueado = await as(app, recepcion).post(`/api/patients/${pacienteId}/payments/${pago.id}/void`, { reason: 'Error de carga' })
+    expect(bloqueado.status).toBe(409)
+    expect(codigo(bloqueado)).toBe('CREDIT_IN_USE')
+    expect(await leerCuenta()).toMatchObject({ balance: '8000.00', availableCredit: '0.00' })
+
+    const uso = (await leerCuenta()).payments.find((p) => p.method === 'CREDIT') as Pago
+    await as(app, recepcion).post(`/api/patients/${pacienteId}/credits/${uso.id}/void`, { reason: 'Se anula el pago' }).expect(200)
+    await as(app, recepcion).post(`/api/patients/${pacienteId}/payments/${pago.id}/void`, { reason: 'Error de carga' }).expect(200)
+    expect(await leerCuenta()).toMatchObject({ balance: '20000.00', availableCredit: '0.00', totalPayments: '0.00' })
+  })
 })
 
 describe('integridad en la base', () => {

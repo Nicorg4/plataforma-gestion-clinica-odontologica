@@ -12,6 +12,7 @@ import {
   seedProfessional,
   seedUser,
   testDb,
+  type Client,
   type Seed,
 } from '../helpers.js'
 
@@ -79,6 +80,7 @@ describe('login', () => {
     }
     const bloqueado = await login(app, 'admin', 'mal-mal-mal-1')
     expect(bloqueado.status).toBe(429)
+    expect((await login(app, '  ADMIN ', 'mal-mal-mal-1')).status).toBe(429)
     expect((await login(app, 'recepcion', PASSWORD)).status).toBe(200)
   })
 
@@ -187,6 +189,19 @@ describe('cambio de contraseña', () => {
     expect(errorDe(await cambiar('equivocada-1234', 'una-clave-nueva-2026'))).toBe('WRONG_CURRENT_PASSWORD')
     expect(errorDe(await cambiar(PASSWORD, 'corta'))).toBe('WEAK_PASSWORD')
     expect(errorDe(await cambiar(PASSWORD, PASSWORD))).toBe('SAME_PASSWORD')
+  })
+
+  it('frena los intentos de adivinar la clave actual desde una sesion abierta', async () => {
+    const app = buildApp(db, { loginRateLimit: { max: 3, windowMs: 60_000 } })
+    const admin = await loginAs(app, 'admin')
+    const recepcion = await loginAs(app, 'recepcion')
+    const cambiar = (client: Client, currentPassword: string) =>
+      as(app, client).post('/api/auth/change-password', { currentPassword, newPassword: 'una-clave-nueva-2026' })
+    for (let i = 0; i < 3; i++) expect((await cambiar(admin, `adivinanza-${i}-1234`)).status).toBe(422)
+    const bloqueado = await cambiar(admin, PASSWORD)
+    expect(bloqueado.status).toBe(429)
+    expect(bloqueado.body).toMatchObject({ error: { code: 'TOO_MANY_ATTEMPTS' } })
+    expect((await cambiar(recepcion, PASSWORD)).status).toBe(204)
   })
 
   it('marca el onboarding como completado', async () => {
