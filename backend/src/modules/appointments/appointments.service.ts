@@ -1,7 +1,7 @@
 import type { Prisma } from '../../generated/prisma/client.js'
 import type { Db } from '../../shared/db.js'
 import { AppError } from '../../shared/errors.js'
-import { isExclusionViolation } from '../../shared/prismaErrors.js'
+import { isExclusionViolation, retryOnWriteConflict } from '../../shared/prismaErrors.js'
 import { recordAudit } from '../audit/audit.service.js'
 import { slotAvailability } from '../availability/availability.service.js'
 import type { AuthContext } from '../auth/auth.types.js'
@@ -289,43 +289,45 @@ export async function createAppointment(
   assertBranchAccess(actor, input.branchId)
 
   try {
-    return await db.$transaction(async (tx) => {
-      await assertReferences(tx, actor, { ...input, practiceId: input.practiceId ?? null }, true)
-      const availability = await checkAvailability(tx, actor, {
-        ...input,
-        practiceId: input.practiceId ?? null,
-        startsAt,
-        endsAt,
-        override: input.override,
-        acknowledgeWarnings: input.acknowledgeWarnings,
-      })
-      const created = await tx.appointment.create({
-        data: {
-          organizationId: actor.organizationId,
-          branchId: input.branchId,
-          patientId: input.patientId,
-          professionalId: input.professionalId,
+    return await retryOnWriteConflict(() =>
+      db.$transaction(async (tx) => {
+        await assertReferences(tx, actor, { ...input, practiceId: input.practiceId ?? null }, true)
+        const availability = await checkAvailability(tx, actor, {
+          ...input,
           practiceId: input.practiceId ?? null,
           startsAt,
           endsAt,
-          notes: input.notes ?? null,
-          createdById: actor.userId,
-          ...availability.data,
-        },
-        include,
-      })
-      if (input.override) await auditOverride(tx, actor, created.id, input.branchId, input.override.reason)
-      else await auditWarnings(tx, actor, created.id, input.branchId, availability.warnings)
-      await recordAudit(tx, {
-        action: 'APPOINTMENT_CREATED',
-        entityType: 'Appointment',
-        entityId: created.id,
-        organizationId: actor.organizationId,
-        actorUserId: actor.userId,
-        branchId: input.branchId,
-      })
-      return toDto(created, actor)
-    })
+          override: input.override,
+          acknowledgeWarnings: input.acknowledgeWarnings,
+        })
+        const created = await tx.appointment.create({
+          data: {
+            organizationId: actor.organizationId,
+            branchId: input.branchId,
+            patientId: input.patientId,
+            professionalId: input.professionalId,
+            practiceId: input.practiceId ?? null,
+            startsAt,
+            endsAt,
+            notes: input.notes ?? null,
+            createdById: actor.userId,
+            ...availability.data,
+          },
+          include,
+        })
+        if (input.override) await auditOverride(tx, actor, created.id, input.branchId, input.override.reason)
+        else await auditWarnings(tx, actor, created.id, input.branchId, availability.warnings)
+        await recordAudit(tx, {
+          action: 'APPOINTMENT_CREATED',
+          entityType: 'Appointment',
+          entityId: created.id,
+          organizationId: actor.organizationId,
+          actorUserId: actor.userId,
+          branchId: input.branchId,
+        })
+        return toDto(created, actor)
+      }),
+    )
   } catch (err) {
     if (isExclusionViolation(err)) {
       throw await conflictError(db, input.professionalId, startsAt, endsAt)
@@ -342,70 +344,72 @@ export async function updateAppointment(
 ): Promise<AppointmentDto> {
   let attempt: { professionalId: string; startsAt: Date; endsAt: Date } | null = null
   try {
-    return await db.$transaction(async (tx) => {
-      const current = await findVisibleOrFail(tx, actor, id)
-      if (!isEditable(current.status)) {
-        throw new AppError(409, 'NOT_EDITABLE', 'Solo se pueden modificar turnos pendientes o confirmados')
-      }
+    return await retryOnWriteConflict(() =>
+      db.$transaction(async (tx) => {
+        const current = await findVisibleOrFail(tx, actor, id)
+        if (!isEditable(current.status)) {
+          throw new AppError(409, 'NOT_EDITABLE', 'Solo se pueden modificar turnos pendientes o confirmados')
+        }
 
-      const startsAt = input.startsAt ? new Date(input.startsAt) : current.startsAt
-      const endsAt = input.endsAt ? new Date(input.endsAt) : current.endsAt
-      const branchId = input.branchId ?? current.branch.id
-      const professionalId = input.professionalId ?? current.professional.id
-      const practiceId = input.practiceId !== undefined ? input.practiceId : (current.practice?.id ?? null)
-      attempt = { professionalId, startsAt, endsAt }
+        const startsAt = input.startsAt ? new Date(input.startsAt) : current.startsAt
+        const endsAt = input.endsAt ? new Date(input.endsAt) : current.endsAt
+        const branchId = input.branchId ?? current.branch.id
+        const professionalId = input.professionalId ?? current.professional.id
+        const practiceId = input.practiceId !== undefined ? input.practiceId : (current.practice?.id ?? null)
+        attempt = { professionalId, startsAt, endsAt }
 
-      assertRange(startsAt, endsAt)
-      assertBranchAccess(actor, branchId)
-      await assertReferences(tx, actor, { patientId: current.patient.id, branchId, professionalId, practiceId }, false)
+        assertRange(startsAt, endsAt)
+        assertBranchAccess(actor, branchId)
+        await assertReferences(tx, actor, { patientId: current.patient.id, branchId, professionalId, practiceId }, false)
 
-      const rescheduled =
-        startsAt.getTime() !== current.startsAt.getTime() ||
-        endsAt.getTime() !== current.endsAt.getTime() ||
-        professionalId !== current.professional.id
-      const slotChanged = rescheduled || branchId !== current.branch.id || practiceId !== (current.practice?.id ?? null)
-      const availability = slotChanged
-        ? await checkAvailability(tx, actor, {
-            professionalId,
+        const rescheduled =
+          startsAt.getTime() !== current.startsAt.getTime() ||
+          endsAt.getTime() !== current.endsAt.getTime() ||
+          professionalId !== current.professional.id
+        const slotChanged = rescheduled || branchId !== current.branch.id || practiceId !== (current.practice?.id ?? null)
+        const availability = slotChanged
+          ? await checkAvailability(tx, actor, {
+              professionalId,
+              branchId,
+              practiceId,
+              startsAt,
+              endsAt,
+              override: input.override,
+              acknowledgeWarnings: input.acknowledgeWarnings,
+            })
+          : null
+
+        const updated = await tx.appointment.update({
+          where: { id },
+          data: {
             branchId,
+            professionalId,
             practiceId,
             startsAt,
             endsAt,
-            override: input.override,
-            acknowledgeWarnings: input.acknowledgeWarnings,
-          })
-        : null
-
-      const updated = await tx.appointment.update({
-        where: { id },
-        data: {
+            ...(input.notes !== undefined ? { notes: input.notes } : {}),
+            ...(rescheduled && current.status === 'CONFIRMED' ? { status: 'SCHEDULED' } : {}),
+            ...availability?.data,
+          },
+          include,
+        })
+        if (availability && input.override) await auditOverride(tx, actor, id, branchId, input.override.reason)
+        else if (availability) await auditWarnings(tx, actor, id, branchId, availability.warnings)
+        await recordAudit(tx, {
+          action: 'APPOINTMENT_UPDATED',
+          entityType: 'Appointment',
+          entityId: id,
+          organizationId: actor.organizationId,
+          actorUserId: actor.userId,
           branchId,
-          professionalId,
-          practiceId,
-          startsAt,
-          endsAt,
-          ...(input.notes !== undefined ? { notes: input.notes } : {}),
-          ...(rescheduled && current.status === 'CONFIRMED' ? { status: 'SCHEDULED' } : {}),
-          ...availability?.data,
-        },
-        include,
-      })
-      if (availability && input.override) await auditOverride(tx, actor, id, branchId, input.override.reason)
-      else if (availability) await auditWarnings(tx, actor, id, branchId, availability.warnings)
-      await recordAudit(tx, {
-        action: 'APPOINTMENT_UPDATED',
-        entityType: 'Appointment',
-        entityId: id,
-        organizationId: actor.organizationId,
-        actorUserId: actor.userId,
-        branchId,
-        metadata: {
-          campos: Object.keys(input).filter((campo) => campo !== 'override' && campo !== 'acknowledgeWarnings'),
-          reprogramado: rescheduled,
-        },
-      })
-      return toDto(updated, actor)
-    })
+          metadata: {
+            campos: Object.keys(input).filter((campo) => campo !== 'override' && campo !== 'acknowledgeWarnings'),
+            reprogramado: rescheduled,
+          },
+        })
+        return toDto(updated, actor)
+      }),
+    )
   } catch (err) {
     const tried = attempt as { professionalId: string; startsAt: Date; endsAt: Date } | null
     if (isExclusionViolation(err) && tried) {
@@ -462,51 +466,53 @@ export async function reactivateAppointment(
 ): Promise<AppointmentDto> {
   let attempt: AppointmentRecord | null = null
   try {
-    return await db.$transaction(async (tx) => {
-      const current = await findVisibleOrFail(tx, actor, id)
-      attempt = current
-      if (!canReactivate(current.status)) {
-        throw new AppError(409, 'INVALID_TRANSITION', 'Solo se reactivan turnos cancelados o ausentes')
-      }
-      assertBranchAccess(actor, current.branch.id)
-      await assertReferences(
-        tx,
-        actor,
-        {
-          patientId: current.patient.id,
-          branchId: current.branch.id,
+    return await retryOnWriteConflict(() =>
+      db.$transaction(async (tx) => {
+        const current = await findVisibleOrFail(tx, actor, id)
+        attempt = current
+        if (!canReactivate(current.status)) {
+          throw new AppError(409, 'INVALID_TRANSITION', 'Solo se reactivan turnos cancelados o ausentes')
+        }
+        assertBranchAccess(actor, current.branch.id)
+        await assertReferences(
+          tx,
+          actor,
+          {
+            patientId: current.patient.id,
+            branchId: current.branch.id,
+            professionalId: current.professional.id,
+            practiceId: current.practice?.id ?? null,
+          },
+          true,
+        )
+        const availability = await checkAvailability(tx, actor, {
           professionalId: current.professional.id,
+          branchId: current.branch.id,
           practiceId: current.practice?.id ?? null,
-        },
-        true,
-      )
-      const availability = await checkAvailability(tx, actor, {
-        professionalId: current.professional.id,
-        branchId: current.branch.id,
-        practiceId: current.practice?.id ?? null,
-        startsAt: current.startsAt,
-        endsAt: current.endsAt,
-        override: input.override,
-        acknowledgeWarnings: input.acknowledgeWarnings,
-      })
-      const updated = await tx.appointment.update({
-        where: { id },
-        data: { status: 'SCHEDULED', cancellationReason: null, ...availability.data },
-        include,
-      })
-      if (input.override) await auditOverride(tx, actor, id, current.branch.id, input.override.reason)
-      else await auditWarnings(tx, actor, id, current.branch.id, availability.warnings)
-      await recordAudit(tx, {
-        action: 'APPOINTMENT_STATUS_CHANGED',
-        entityType: 'Appointment',
-        entityId: id,
-        organizationId: actor.organizationId,
-        actorUserId: actor.userId,
-        branchId: current.branch.id,
-        metadata: { desde: current.status, hacia: 'SCHEDULED', reactivado: true },
-      })
-      return toDto(updated, actor)
-    })
+          startsAt: current.startsAt,
+          endsAt: current.endsAt,
+          override: input.override,
+          acknowledgeWarnings: input.acknowledgeWarnings,
+        })
+        const updated = await tx.appointment.update({
+          where: { id },
+          data: { status: 'SCHEDULED', cancellationReason: null, ...availability.data },
+          include,
+        })
+        if (input.override) await auditOverride(tx, actor, id, current.branch.id, input.override.reason)
+        else await auditWarnings(tx, actor, id, current.branch.id, availability.warnings)
+        await recordAudit(tx, {
+          action: 'APPOINTMENT_STATUS_CHANGED',
+          entityType: 'Appointment',
+          entityId: id,
+          organizationId: actor.organizationId,
+          actorUserId: actor.userId,
+          branchId: current.branch.id,
+          metadata: { desde: current.status, hacia: 'SCHEDULED', reactivado: true },
+        })
+        return toDto(updated, actor)
+      }),
+    )
   } catch (err) {
     const tried = attempt as AppointmentRecord | null
     if (isExclusionViolation(err) && tried) {
