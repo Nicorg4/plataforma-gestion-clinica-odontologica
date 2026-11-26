@@ -6,6 +6,17 @@ test.describe.configure({ mode: 'serial' })
 const captura = (nombre: string) => `test-results/screens/${nombre}.png`
 const ADMIN = { username: ADMIN_USERNAME, password: ADMIN_PASSWORD }
 
+test.beforeAll(async () => {
+  const admin = await apiLogin(ADMIN_USERNAME, ADMIN_PASSWORD)
+  try {
+    const modules = await admin.put('/api/organization/modules', { coverages: true })
+    expect(modules.status()).toBe(200)
+    expect(await modules.json()).toEqual({ coverages: true })
+  } finally {
+    await admin.dispose()
+  }
+})
+
 async function ingresar(page: Page, usuario: { username: string; password: string }) {
   await page.goto('/login')
   await page.getByLabel('Usuario').fill(usuario.username)
