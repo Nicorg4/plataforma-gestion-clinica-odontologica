@@ -35,6 +35,7 @@ interface Item {
 interface Plan {
   id: string
   status: string
+  acceptedAt: string | null
   total: string | null
   items: Item[]
 }
@@ -101,6 +102,41 @@ describe('plan de tratamiento', () => {
     expect(aceptado).toMatchObject({ status: 'ACCEPTED', total: '260000.00' })
     const repetido = await as(app, recepcion).post(`${planes()}/${plan.id}/accept`)
     expect(codigo(repetido)).toBe('PLAN_NOT_DRAFT')
+
+    const recotizado = await as(app, recepcion).put(`${planes()}/${plan.id}/items/${primero?.id}/price`, { price: '95000' }).expect(200)
+    expect(recotizado.body).toMatchObject({ status: 'DRAFT', total: '265000.00', acceptedAt: null })
+    expect(await db.treatmentPlan.findUniqueOrThrow({ where: { id: plan.id } })).toMatchObject({ acceptedAt: null, acceptedById: null })
+    const evento = await db.auditLog.findFirstOrThrow({
+      where: { action: 'TREATMENT_ITEM_PRICED', entityId: primero?.id, metadata: { path: ['reabreAceptacion'], equals: true } },
+    })
+    expect(evento.metadata).toMatchObject({ planId: plan.id, before: '90000.00', after: '95000.00', reabreAceptacion: true })
+    const reaceptado = await as(app, recepcion).post(`${planes()}/${plan.id}/accept`).expect(200)
+    expect(reaceptado.body).toMatchObject({ status: 'ACCEPTED', total: '265000.00' })
+    expect(typeof (reaceptado.body as Plan).acceptedAt).toBe('string')
+  })
+
+  it('conserva la aceptacion al cotizar el mismo importe normalizado', async () => {
+    const plan = await cotizarYAceptar(await planConItems(), ['90000', '170000'])
+    const antes = await db.treatmentPlan.findUniqueOrThrow({ where: { id: plan.id } })
+    expect(antes.acceptedAt).not.toBeNull()
+    expect(antes.acceptedById).not.toBeNull()
+    const item = plan.items[0]?.id
+    const sinCambio = await as(app, recepcion).put(`${planes()}/${plan.id}/items/${item}/price`, { price: '90000.00' }).expect(200)
+    expect(sinCambio.body).toMatchObject({ status: 'ACCEPTED', total: '260000.00', acceptedAt: antes.acceptedAt?.toISOString() })
+    const despues = await db.treatmentPlan.findUniqueOrThrow({ where: { id: plan.id } })
+    expect([despues.acceptedAt, despues.acceptedById]).toEqual([antes.acceptedAt, antes.acceptedById])
+    const eventos = await db.auditLog.findMany({ where: { action: 'TREATMENT_ITEM_PRICED', entityId: item } })
+    for (const evento of eventos) expect(evento.metadata).not.toHaveProperty('reabreAceptacion')
+  })
+
+  it('una reduccion de precio en un item en curso tambien requiere nueva aceptacion', async () => {
+    const plan = await cotizarYAceptar(await planConItems(), ['90000', '170000'])
+    const item = plan.items[0]?.id
+    await as(app, odontologo).post(`${planes()}/${plan.id}/items/${item}/start`).expect(200)
+    const recotizado = await as(app, recepcion).put(`${planes()}/${plan.id}/items/${item}/price`, { price: '85000' }).expect(200)
+    expect(recotizado.body).toMatchObject({ status: 'DRAFT', total: '255000.00', acceptedAt: null })
+    expect((recotizado.body as Plan).items[0]).toMatchObject({ status: 'IN_PROGRESS', agreedPrice: '85000.00' })
+    await as(app, recepcion).post(`${planes()}/${plan.id}/accept`).expect(200)
   })
 
   it('cada rol hace solo su parte', async () => {
