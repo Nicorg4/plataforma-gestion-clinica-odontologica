@@ -10,6 +10,7 @@ import {
 
 let minuto = 0
 const hallazgo = (tooth: number, condition: Condition, surface: Surface | null = null): Finding => ({
+  id: `h-${String(minuto + 1).padStart(4, '0')}`,
   tooth,
   surface,
   condition,
@@ -60,6 +61,30 @@ describe('currentState', () => {
       [36, null, 'MISSING'],
       [37, 'O', 'SEALANT'],
     ])
+  })
+
+  it('con la misma hora desempata por id sin importar el orden recibido', () => {
+    const mismaHora = new Date(Date.UTC(2026, 9, 1, 12, 0))
+    const caries = { ...hallazgo(21, 'CARIES', 'O'), id: 'h-a', createdAt: mismaHora }
+    const restauracion = { ...hallazgo(21, 'RESTORATION', 'O'), id: 'h-b', createdAt: mismaHora }
+    expect(currentState([restauracion, caries]).map((h) => h.condition)).toEqual(['RESTORATION'])
+    expect(currentState([caries, restauracion]).map((h) => h.condition)).toEqual(['RESTORATION'])
+  })
+
+  it('desempata tambien al limpiar una pieza completa sin modificar el historial', () => {
+    const mismaHora = new Date(Date.UTC(2026, 9, 1, 12, 0))
+    const caries = { ...hallazgo(21, 'CARIES', 'O'), id: 'h-a', createdAt: mismaHora }
+    const sano = { ...hallazgo(21, 'HEALTHY'), id: 'h-b', createdAt: mismaHora }
+    const historial = [sano, caries]
+    expect(currentState(historial)).toEqual([])
+    expect(currentState([caries, sano])).toEqual([])
+    expect(historial).toEqual([sano, caries])
+  })
+
+  it('la fecha mas reciente tiene prioridad sobre el id', () => {
+    const caries = { ...hallazgo(21, 'CARIES', 'O'), id: 'h-z' }
+    const restauracion = { ...hallazgo(21, 'RESTORATION', 'O'), id: 'h-a' }
+    expect(currentState([restauracion, caries])).toEqual([restauracion])
   })
 
   it('el historial no se pierde: el estado es solo una vista de lo registrado', () => {

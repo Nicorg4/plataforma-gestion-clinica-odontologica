@@ -1,4 +1,5 @@
 import type request from 'supertest'
+import { readFile } from 'node:fs/promises'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   as,
@@ -152,5 +153,51 @@ describe('prestaciones con cobertura', () => {
       patientCopay: '3000.00',
     })
     expect((await as(app, odontologo).get(ruta).expect(200)).body).toMatchObject({ insurerAmount: null, patientCopay: null })
+  })
+})
+
+describe('modulo de coberturas', () => {
+  it('la migracion conserva coberturas en consultorios existentes y las deja apagadas en los nuevos', async () => {
+    const sql = await readFile(new URL('../../prisma/migrations/20261028020000_modulos_y_whatsapp/migration.sql', import.meta.url), 'utf8')
+    await db.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('CREATE TEMP TABLE "Organization" (id text PRIMARY KEY) ON COMMIT DROP')
+      await tx.$executeRawUnsafe('CREATE TEMP TABLE "Patient" (id text PRIMARY KEY) ON COMMIT DROP')
+      await tx.$executeRaw`INSERT INTO "Organization" (id) VALUES ('existente')`
+      for (const statement of sql.split(';').filter((part) => part.trim())) await tx.$executeRawUnsafe(statement)
+      await tx.$executeRaw`INSERT INTO "Organization" (id) VALUES ('nuevo')`
+      await tx.$executeRaw`INSERT INTO "Patient" (id) VALUES ('paciente')`
+      expect(await tx.$queryRaw`SELECT id, "coveragesEnabled" FROM "Organization" ORDER BY id`).toEqual([
+        { id: 'existente', coveragesEnabled: true },
+        { id: 'nuevo', coveragesEnabled: false },
+      ])
+      expect(await tx.$queryRaw`SELECT "phoneHasWhatsapp" FROM "Patient"`).toEqual([{ phoneHasWhatsapp: true }])
+    })
+  })
+
+  it('apagado oculta y rechaza coberturas y liquidaciones, y cobra completo al paciente', async () => {
+    await asignar(await planConConvenio()).expect(201)
+    await seedUser(db, seed, { username: 'admin', roles: ['ADMIN'] })
+    const admin = await loginAs(app, 'admin')
+    await as(app, recepcion).put('/api/organization/modules', { coverages: false }).expect(403)
+    expect((await as(app, admin).put('/api/organization/modules', { coverages: false }).expect(200)).body).toEqual({ coverages: false })
+
+    const sesion = (await as(app, recepcion).get('/api/auth/me').expect(200)).body as { user: { permissions: string[]; modules: { coverages: boolean } } }
+    expect(sesion.user.modules).toEqual({ coverages: false })
+    expect(sesion.user.permissions).not.toContain('coverages:manage')
+    expect(sesion.user.permissions).not.toContain('liquidations:manage')
+    for (const ruta of ['/api/coverages', '/api/liquidations', `/api/patients/${pacienteId}/coverages`]) {
+      const res = await as(app, recepcion).get(ruta)
+      expect([res.status, codigo(res)]).toEqual([403, 'MODULE_DISABLED'])
+    }
+    expect((await registrar(consulta.id).expect(201)).body).toMatchObject({ price: '10000.00', coverageAmount: '0.00', coverage: null })
+
+    await as(app, admin).put('/api/organization/modules', { coverages: true }).expect(200)
+    expect((await as(app, recepcion).get(`/api/patients/${pacienteId}/coverages`).expect(200)).body).toHaveLength(1)
+    expect(await db.auditLog.count({ where: { action: 'ORGANIZATION_MODULES_UPDATED' } })).toBe(2)
+  })
+
+  it('una instalacion nueva arranca con el modulo apagado', async () => {
+    const [columna] = await db.$queryRaw<{ column_default: string }[]>`SELECT column_default FROM information_schema.columns WHERE table_name = 'Organization' AND column_name = 'coveragesEnabled'`
+    expect(columna?.column_default).toBe('false')
   })
 })
