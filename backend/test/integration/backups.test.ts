@@ -5,6 +5,8 @@ import request from 'supertest'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { maintenanceGuard } from '../../src/middleware/maintenance.js'
 import { pgToolsAvailable } from '../../src/modules/backups/backups.archive.js'
+import { startBackupScheduler } from '../../src/modules/backups/backups.scheduler.js'
+import { createLogger } from '../../src/shared/logger.js'
 import {
   as,
   ORIGIN,
@@ -62,6 +64,20 @@ afterAll(async () => {
 })
 
 describe('backups: acceso y validaciones', () => {
+  it('el estado refleja la pausa y detencion del scheduler con los ajustes vigentes', async () => {
+    const stop = startBackupScheduler(db, TEST_BACKUPS, createLogger({ level: 'silent' }))
+    try {
+      const estado = await as(app, admin).get('/api/backups/status').expect(200)
+      expect(typeof (estado.body as { nextScheduled: string | null }).nextScheduled).toBe('string')
+      await as(app, admin).put('/api/organization/settings', {
+        backups: { schedule: 'WEEKLY', hour: 4, weekday: 3, paused: true, keepDaily: 1, keepWeekly: 0, keepManual: 1 },
+      }).expect(200)
+      expect((await as(app, admin).get('/api/backups/status').expect(200)).body).toMatchObject({ nextScheduled: null })
+    } finally {
+      stop()
+    }
+    expect((await as(app, admin).get('/api/backups/status').expect(200)).body).toMatchObject({ nextScheduled: null })
+  })
   it('solo administracion ve, genera y restaura backups', async () => {
     expect((await as(app, recepcion).get('/api/backups')).status).toBe(403)
     expect((await as(app, recepcion).post('/api/backups')).status).toBe(403)
@@ -125,6 +141,18 @@ describe('backups: acceso y validaciones', () => {
 })
 
 describe.skipIf(!herramientas)('backups: generar y restaurar de verdad', () => {
+  it('aplica la retencion configurada tambien al completar backups manuales', async () => {
+    await as(app, admin).put('/api/organization/settings', {
+      backups: { schedule: 'DAILY', hour: 3, weekday: 7, paused: false, keepDaily: 1, keepWeekly: 0, keepManual: 1 },
+    }).expect(200)
+    const primero = (await as(app, admin).post('/api/backups').expect(202)).body as Backup
+    expect((await esperar(primero.id)).status).toBe('SUCCEEDED')
+    const segundo = (await as(app, admin).post('/api/backups').expect(202)).body as Backup
+    expect((await esperar(segundo.id)).status).toBe('SUCCEEDED')
+    const lista = (await as(app, admin).get('/api/backups').expect(200)).body as Backup[]
+    expect(lista.map((b) => b.id)).toEqual([segundo.id])
+    await expect(readFile(path.join(TEST_BACKUPS.dir, `${primero.id}.tar`))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
   it('restaura la base y los archivos al estado del backup y mantiene la sesion', async () => {
     const original = await seedPatient(db, seed, { firstName: 'Antes', lastName: 'Del Backup' })
     await mkdir(path.join(TEST_FILES.dir, '2026', '10'), { recursive: true })
