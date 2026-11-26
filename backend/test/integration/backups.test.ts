@@ -5,7 +5,7 @@ import request from 'supertest'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { maintenanceGuard } from '../../src/middleware/maintenance.js'
 import { pgToolsAvailable } from '../../src/modules/backups/backups.archive.js'
-import { startBackupScheduler } from '../../src/modules/backups/backups.scheduler.js'
+import { checkScheduledBackup, startBackupScheduler } from '../../src/modules/backups/backups.scheduler.js'
 import { createLogger } from '../../src/shared/logger.js'
 import {
   as,
@@ -141,6 +141,38 @@ describe('backups: acceso y validaciones', () => {
 })
 
 describe.skipIf(!herramientas)('backups: generar y restaurar de verdad', () => {
+  it('limita los fallos de preparacion y conserva esos intentos pese a la retencion baja', async () => {
+    await as(app, admin).put('/api/organization/settings', {
+      backups: { schedule: 'DAILY', hour: 3, weekday: 7, paused: false, keepDaily: 1, keepWeekly: 0, keepManual: 1 },
+    }).expect(200)
+    const logger = createLogger({ level: 'silent' })
+    const sinHerramientas = { ...TEST_BACKUPS, pgBinDir: path.join(TEST_BACKUPS.dir, 'sin-herramientas') }
+    for (let i = 0; i < 3; i++) await expect(checkScheduledBackup(db, sinHerramientas, logger)).rejects.toMatchObject({ code: 'PG_TOOLS_MISSING' })
+    await checkScheduledBackup(db, sinHerramientas, logger)
+    const intentos = (await as(app, admin).get('/api/backups').expect(200)).body as Backup[]
+    expect(intentos).toHaveLength(3)
+    expect(intentos.every((b) => b.status === 'FAILED')).toBe(true)
+    const manual = (await as(app, admin).post('/api/backups').expect(202)).body as Backup
+    expect((await esperar(manual.id)).status).toBe('SUCCEEDED')
+    const conservados = (await as(app, admin).get('/api/backups').expect(200)).body as Backup[]
+    expect(conservados.filter((b) => b.status === 'FAILED')).toHaveLength(3)
+    await checkScheduledBackup(db, sinHerramientas, logger)
+    expect(((await as(app, admin).get('/api/backups').expect(200)).body as Backup[])).toHaveLength(4)
+  })
+
+  it('el scheduler no ejecuta backups en pausa ni duplica un horario completado', async () => {
+    const settings = { schedule: 'DAILY', hour: 3, weekday: 7, paused: true, keepDaily: 1, keepWeekly: 0, keepManual: 1 }
+    const logger = createLogger({ level: 'silent' })
+    await as(app, admin).put('/api/organization/settings', { backups: settings }).expect(200)
+    await checkScheduledBackup(db, TEST_BACKUPS, logger)
+    expect((await as(app, admin).get('/api/backups').expect(200)).body).toEqual([])
+    await as(app, admin).put('/api/organization/settings', { backups: { ...settings, paused: false } }).expect(200)
+    await checkScheduledBackup(db, TEST_BACKUPS, logger)
+    await checkScheduledBackup(db, TEST_BACKUPS, logger)
+    const lista = (await as(app, admin).get('/api/backups').expect(200)).body as Backup[]
+    expect(lista).toHaveLength(1)
+    expect(lista[0]?.status).toBe('SUCCEEDED')
+  })
   it('aplica la retencion configurada tambien al completar backups manuales', async () => {
     await as(app, admin).put('/api/organization/settings', {
       backups: { schedule: 'DAILY', hour: 3, weekday: 7, paused: false, keepDaily: 1, keepWeekly: 0, keepManual: 1 },

@@ -114,6 +114,7 @@ interface Context {
   organizationId: string | null
   timeZone: string
   retention: RetentionPolicy
+  latestSlot: Date | null
 }
 
 async function contextOf(db: Db): Promise<Context> {
@@ -123,6 +124,7 @@ async function contextOf(db: Db): Promise<Context> {
     organizationId: organization?.id ?? null,
     timeZone: organization?.timezone ?? 'UTC',
     retention: { daily: backups.keepDaily, weekly: backups.keepWeekly, manual: backups.keepManual },
+    latestSlot: backupSlots({ ...backups, paused: false }, new Date(), organization?.timezone ?? 'UTC').latest,
   }
 }
 
@@ -162,7 +164,9 @@ async function succeededOrFail(config: BackupConfig, id: string) {
 }
 
 async function applyRetention(config: BackupConfig, logger: Logger, context: Context) {
-  const doomed = backupsToDelete(await listBackups(config), (iso) => localDay(new Date(iso), context.timeZone), context.retention)
+  const records = await listBackups(config)
+  const currentSlot = new Set(records.filter((b) => b.kind === 'SCHEDULED' && context.latestSlot && new Date(b.startedAt) >= context.latestSlot).map((b) => b.id))
+  const doomed = backupsToDelete(records, (iso) => localDay(new Date(iso), context.timeZone), context.retention).filter((id) => !currentSlot.has(id))
   for (const id of doomed) {
     await rm(archiveFile(config, id), { force: true })
     await rm(recordFile(config, id), { force: true })
@@ -249,7 +253,21 @@ export async function startBackup(
     await audit(db, context, actor, { action: 'BACKUP_STARTED', entityId: record.id, metadata: { tipo: kind } })
     return { record, done: runBackup(db, config, logger, context, actor, record) }
   } catch (err) {
-    state.running = null
+    try {
+      if (kind === 'SCHEDULED') {
+        await mkdir(config.dir, { recursive: true })
+        await writeRecord(config, {
+          ...record,
+          status: 'FAILED',
+          finishedAt: new Date().toISOString(),
+          error: err instanceof AppError ? err.message : 'No se pudo iniciar el backup automático',
+        })
+      }
+    } catch (recordError) {
+      logger.error({ err: recordError, backup: record.id }, 'no se pudo registrar el intento de backup')
+    } finally {
+      state.running = null
+    }
     throw err
   }
 }
