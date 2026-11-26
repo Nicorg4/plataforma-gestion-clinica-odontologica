@@ -1,6 +1,6 @@
 'use client'
 
-import { Plus, Search } from 'lucide-react'
+import { Plus, Search, Upload } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -8,7 +8,7 @@ import { FormError } from '@/components/form-error'
 import { Pagination } from '@/components/pagination'
 import { EmptyState, LoadingBlock, PageHeader } from '@/components/page-header'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { useDebouncedValue } from '@/hooks/use-debounced-value'
 import { usePatients } from '@/hooks/use-patients'
@@ -48,10 +48,16 @@ export default function PatientsPage() {
         description="Buscá por apellido, nombre, documento o teléfono."
         actions={
           canWrite && (
-            <Button onClick={() => setCreating(true)}>
-              <Plus className="size-4" aria-hidden />
-              Nuevo paciente
-            </Button>
+            <>
+              <Link href="/patients/import" className={buttonVariants({ variant: 'outline' })}>
+                <Upload className="size-4" aria-hidden />
+                Importar CSV
+              </Link>
+              <Button onClick={() => setCreating(true)}>
+                <Plus className="size-4" aria-hidden />
+                Nuevo paciente
+              </Button>
+            </>
           )
         }
       />
