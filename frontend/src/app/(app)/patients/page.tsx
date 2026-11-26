@@ -2,7 +2,7 @@
 
 import { Plus, Search, Upload } from 'lucide-react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { FormError } from '@/components/form-error'
 import { Pagination } from '@/components/pagination'
@@ -20,13 +20,18 @@ import { PatientFormDialog } from '@/components/patients/patient-form-dialog'
 type Status = 'active' | 'archived' | 'all'
 
 export default function PatientsPage() {
+  const query = useSearchParams().get('q') ?? ''
+  return <PatientsList key={query} initialQuery={query} />
+}
+
+function PatientsList({ initialQuery }: { initialQuery: string }) {
   const router = useRouter()
   const session = useSession()
   const user = session.data?.user
   const allowed = can(user, 'patients:read')
   const canWrite = can(user, 'patients:write')
 
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(initialQuery)
   const [status, setStatus] = useState<Status>('active')
   const [page, setPage] = useState(1)
   const [creating, setCreating] = useState(false)
