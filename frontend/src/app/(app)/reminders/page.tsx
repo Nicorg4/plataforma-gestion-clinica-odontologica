@@ -10,6 +10,7 @@ import { EmptyState, LoadingBlock, PageHeader } from '@/components/page-header'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { appointmentsKey } from '@/hooks/use-appointments'
+import { useOrganization } from '@/hooks/use-organization'
 import { useSession } from '@/hooks/use-session'
 import { api } from '@/lib/api'
 import type { components } from '@/lib/api-types'
@@ -33,9 +34,13 @@ export default function RemindersPage() {
   const session = useSession()
   const user = session.data?.user
   const allowed = can(user, 'appointments:manage')
-  const [day, setDay] = useState(() => shiftIsoDay(toIsoDay(new Date()), 1))
+  const organization = useOrganization(allowed)
+  const [chosen, setDay] = useState<string | null>(null)
+  const [today] = useState(() => toIsoDay(new Date()))
+  const day = chosen ?? shiftIsoDay(today, organization.data?.settings.reminders.daysAhead ?? 1)
+  const settingsReady = Boolean(organization.data) && !organization.isError
   const key = ['reminders', user?.id, day]
-  const reminders = useQuery({ queryKey: key, queryFn: () => api.get<Day>(`/api/reminders?date=${day}`), enabled: allowed })
+  const reminders = useQuery({ queryKey: key, queryFn: () => api.get<Day>(`/api/reminders?date=${day}`), enabled: allowed && settingsReady })
   const generate = useMutation({ mutationFn: (date: string) => api.post<Day>('/api/reminders/generate', { date }), onSuccess: (data) => client.setQueryData(['reminders', user?.id, data.date], data) })
   const act = useMutation({
     mutationFn: ({ id, action }: { id: string; action: 'sent' | 'confirm' | 'cancel'; date: string }) => api.post<Reminder>(`/api/reminders/${id}/${action}`),
@@ -63,7 +68,7 @@ export default function RemindersPage() {
         title="Recordatorios"
         description="Abrí WhatsApp y enviá el mensaje; después registrá el envío manualmente. Si el paciente no usa WhatsApp, avisale por llamada."
         actions={
-          <Button disabled={generate.isPending} onClick={() => generate.mutate(day)}>
+          <Button disabled={generate.isPending || !settingsReady} onClick={() => generate.mutate(day)}>
             Generar los que faltan
           </Button>
         }
@@ -78,7 +83,8 @@ export default function RemindersPage() {
         </Button>
         {pending > 0 && <span className="text-sm text-muted-foreground">{pending} para enviar</span>}
       </div>
-      <FormError error={reminders.error ?? generate.error ?? act.error} className="mb-4" />
+      <FormError error={organization.error ?? reminders.error ?? generate.error ?? act.error} className="mb-4" />
+      {organization.isError && <Button variant="outline" onClick={() => void organization.refetch()}>Reintentar configuración</Button>}
       {reminders.isPending ? (
         <LoadingBlock />
       ) : list.length === 0 ? (
