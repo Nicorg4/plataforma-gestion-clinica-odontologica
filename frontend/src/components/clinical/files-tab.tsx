@@ -12,8 +12,9 @@ import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
 import { Input, Select } from '@/components/ui/input'
 import { useArchiveClinicalFile, useClinicalFiles, useUploadClinicalFile } from '@/hooks/use-clinical'
+import { useOrganization } from '@/hooks/use-organization'
 import type { ClinicalFile } from '@/lib/api'
-import { FILE_CATEGORY_LABELS, fileProblem, formatBytes } from '@/lib/files'
+import { FILE_CATEGORY_LABELS, fileProblem, formatBytes, maxFileMb } from '@/lib/files'
 import { formatDateTime } from '@/lib/format'
 
 interface Props {
@@ -128,17 +129,25 @@ function UploadForm({ patientId, onDone }: { patientId: string; onDone: () => vo
   const [file, setFile] = useState<File | null>(null)
   const [category, setCategory] = useState<ClinicalFile['category']>('XRAY')
   const [description, setDescription] = useState('')
-  const problem = file ? fileProblem(file) : null
+  const organization = useOrganization()
+  const maxMb = organization.data ? maxFileMb(organization.data) : null
+  const problem = file ? fileProblem(file, maxMb) : null
+  const ready = maxMb !== null && !organization.isError && !organization.isFetching
 
   return (
     <form
       className="space-y-4"
       onSubmit={(event) => {
         event.preventDefault()
-        if (file) upload.mutate({ file, category, description }, { onSuccess: onDone })
+        if (file && !problem && ready) upload.mutate({ file, category, description }, { onSuccess: onDone })
       }}
     >
-      <Field label="Archivo" htmlFor="file-input" error={problem ?? undefined}>
+      <Field
+        label="Archivo"
+        htmlFor="file-input"
+        error={problem ?? undefined}
+        {...(maxMb !== null ? { hint: `PDF, JPG o PNG de hasta ${maxMb} MB` } : {})}
+      >
         <Input
           id="file-input"
           type="file"
@@ -158,12 +167,13 @@ function UploadForm({ patientId, onDone }: { patientId: string; onDone: () => vo
       <Field label="Descripción (opcional)" htmlFor="file-description">
         <Input id="file-description" maxLength={300} value={description} onChange={(e) => setDescription(e.target.value)} />
       </Field>
-      <FormError error={upload.error} />
+      <FormError error={organization.error ?? upload.error} />
+      {organization.isError && <Button type="button" variant="outline" onClick={() => void organization.refetch()}>Reintentar configuración</Button>}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onDone} disabled={upload.isPending}>
           Cancelar
         </Button>
-        <Button type="submit" disabled={!file || !!problem || upload.isPending}>
+        <Button type="submit" disabled={!ready || !file || !!problem || upload.isPending}>
           {upload.isPending ? 'Subiendo…' : 'Subir'}
         </Button>
       </DialogFooter>
