@@ -84,7 +84,7 @@ export default function RemindersPage() {
       ) : list.length === 0 ? (
         <EmptyState title="No hay recordatorios para ese día" description="Tocá «Generar los que faltan» para crearlos a partir de los turnos." />
       ) : (
-        <ul className="divide-y rounded-lg border bg-card shadow-sm">
+        <ul className="divide-y rounded-lg border bg-card shadow-sm" data-tour="reminders-list">
           {list.map((reminder) => (
             <li key={reminder.id} className="flex flex-col gap-2 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
@@ -98,7 +98,7 @@ export default function RemindersPage() {
                     · {reminder.appointment.professional} · {reminder.appointment.branch}
                   </span>
                 </p>
-                <p className="text-xs text-muted-foreground">{reminder.failureReason ?? reminder.phone}</p>
+                <p className="text-xs text-muted-foreground">{[reminder.phone, reminder.failureReason].filter(Boolean).join(' · ')}</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={STATUS[reminder.status].variant}>{STATUS[reminder.status].label}</Badge>

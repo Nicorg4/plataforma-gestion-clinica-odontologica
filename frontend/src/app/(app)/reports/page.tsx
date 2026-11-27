@@ -9,7 +9,8 @@ import { FormError } from '@/components/form-error'
 import { EmptyState, LoadingBlock, PageHeader } from '@/components/page-header'
 import { Button } from '@/components/ui/button'
 import { Field } from '@/components/ui/field'
-import { MaskedInput, Select } from '@/components/ui/input'
+import { Select } from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import { Tabs } from '@/components/ui/tabs'
 import { useBranches } from '@/hooks/use-admin'
 import { useProfessionals } from '@/hooks/use-catalog'
@@ -18,7 +19,7 @@ import { api, type Debtor } from '@/lib/api'
 import type { components } from '@/lib/api-types'
 import { CURRENCY_LABELS, PAYMENT_METHOD_LABELS } from '@/lib/billing'
 import { csvAmount, downloadCsv } from '@/lib/csv'
-import { formatDate, formatMoney, maskDate, parseDateText, toDateText } from '@/lib/format'
+import { formatDate, formatMoney, parseDateText, toDateText } from '@/lib/format'
 import { can, visibleBranches } from '@/lib/permissions'
 
 type Schemas = components['schemas']
@@ -77,6 +78,7 @@ export default function ReportsPage() {
     <>
       <PageHeader title="Reportes" description="Turnos, cobranzas, prestaciones y saldos del período. Cada tabla se puede exportar a CSV." />
       <form
+        data-tour="reports-filters"
         className="mb-4 grid gap-3 sm:grid-cols-[repeat(4,minmax(0,1fr))_auto] sm:items-end"
         onSubmit={(event) => {
           event.preventDefault()
@@ -84,10 +86,10 @@ export default function ReportsPage() {
         }}
       >
         <Field label="Desde" htmlFor="report-from">
-          <MaskedInput id="report-from" mask={maskDate} placeholder="dd/mm/aaaa" value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />
+          <DateInput id="report-from" value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />
         </Field>
         <Field label="Hasta" htmlFor="report-to">
-          <MaskedInput id="report-to" mask={maskDate} placeholder="dd/mm/aaaa" value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
+          <DateInput id="report-to" value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
         </Field>
         <Field label="Sede" htmlFor="report-branch">
           <Select id="report-branch" value={draft.branchId} onChange={(e) => setDraft({ ...draft, branchId: e.target.value })}>
@@ -115,6 +117,7 @@ export default function ReportsPage() {
       </form>
 
       <Tabs
+        anchor="reports-tabs"
         items={[
           { id: 'turnos', label: 'Turnos' },
           { id: 'cobranzas', label: 'Cobranzas' },

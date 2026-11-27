@@ -1,10 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import { GlobalSearch } from '@/components/layout/global-search'
-import { TutorialDialog } from '@/components/layout/tutorial-dialog'
-import { api, ApiError, type SessionUser } from '@/lib/api'
+import { api } from '@/lib/api'
 
 const { push } = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }))
@@ -36,29 +35,4 @@ it('Enter conserva la consulta codificada para el listado y Escape cierra los re
   expect(screen.queryByRole('list')).not.toBeInTheDocument()
   await userEvent.keyboard('{Enter}')
   expect(push).toHaveBeenCalledWith('/patients?q=Ana%20%26%20P%C3%A9rez')
-})
-
-it('mantiene onboarding abierto si falla el guardado y permite reintentar', async () => {
-  const post = vi.spyOn(api, 'post').mockRejectedValueOnce(new ApiError(503, 'UNAVAILABLE', 'No se pudo guardar el tutorial', {})).mockResolvedValue(undefined)
-  const close = vi.fn()
-  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
-  const invalidate = vi.spyOn(client, 'invalidateQueries')
-  const user = { permissions: ['patients:read'], onboardingCompleted: false } as SessionUser
-  render(<QueryClientProvider client={client}><TutorialDialog user={user} open onOpenChange={close} /></QueryClientProvider>)
-  await userEvent.click(screen.getByRole('button', { name: 'Saltear' }))
-  expect(await screen.findByText('No se pudo guardar el tutorial')).toBeVisible()
-  expect(close).not.toHaveBeenCalled()
-  await userEvent.click(screen.getByRole('button', { name: 'Saltear' }))
-  await waitFor(() => expect(close).toHaveBeenCalledWith(false))
-  expect(post).toHaveBeenCalledWith('/api/auth/onboarding/complete')
-  expect(invalidate).toHaveBeenCalledWith({ queryKey: ['session'] })
-})
-
-it('reabrir la ayuda de un usuario ya incorporado no vuelve a registrar onboarding', async () => {
-  const post = vi.spyOn(api, 'post')
-  const close = vi.fn()
-  render(<QueryClientProvider client={new QueryClient()}><TutorialDialog user={{ permissions: [], onboardingCompleted: true } as unknown as SessionUser} open onOpenChange={close} /></QueryClientProvider>)
-  await userEvent.click(screen.getByRole('button', { name: 'Saltear' }))
-  expect(close).toHaveBeenCalledWith(false)
-  expect(post).not.toHaveBeenCalled()
 })

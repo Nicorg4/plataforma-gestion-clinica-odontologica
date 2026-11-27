@@ -10,13 +10,14 @@ import { FormError } from '@/components/form-error'
 import { EmptyState, LoadingBlock, PageHeader } from '@/components/page-header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { MaskedInput } from '@/components/ui/input'
 import { useCashDay } from '@/hooks/use-billing'
 import { useSession } from '@/hooks/use-session'
 import type { CashDay } from '@/lib/api'
-import { CURRENCY_LABELS, PAYMENT_METHOD_LABELS, paymentAmountText } from '@/lib/billing'
-import { formatDate, formatMoney, formatTime, maskDate, parseDateText, shiftIsoDay, toIsoDay } from '@/lib/format'
+import { PaymentAmount } from '@/components/billing/payment-amount'
+import { CURRENCY_LABELS, PAYMENT_METHOD_LABELS } from '@/lib/billing'
+import { formatDate, formatMoney, formatTime, parseDateText, shiftIsoDay, toIsoDay } from '@/lib/format'
 import { can } from '@/lib/permissions'
+import { DateInput } from '@/components/ui/date-input'
 
 export default function CashPage() {
   const router = useRouter()
@@ -26,7 +27,7 @@ export default function CashPage() {
   const today = toIsoDay(new Date())
   const [day, setDay] = useState(today)
   const [jumpTo, setJumpTo] = useState('')
-  const cash = useCashDay(day)
+  const cash = useCashDay(day, allowed)
 
   useEffect(() => {
     if (user && !allowed) router.replace('/dashboard')
@@ -40,7 +41,7 @@ export default function CashPage() {
     <>
       <PageHeader title="Caja" description="Cobros del día por medio de pago y moneda. Lo anulado se muestra pero no suma." />
 
-      <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center" data-tour="cash-day">
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" aria-label="Día anterior" onClick={() => go(shiftIsoDay(day, -1))}>
             <ChevronLeft className="size-4" aria-hidden />
@@ -64,11 +65,9 @@ export default function CashPage() {
             if (parsed) go(parsed)
           }}
         >
-          <MaskedInput
+          <DateInput
             aria-label="Ir a la fecha"
-            placeholder="dd/mm/aaaa"
-            className="w-32"
-            mask={maskDate}
+            className="w-40"
             value={jumpTo}
             onChange={(event) => setJumpTo(event.target.value)}
           />
@@ -154,7 +153,9 @@ function CashSummary({ data }: { data: CashDay }) {
                 <div className="flex items-center gap-2">
                   {movement.status === 'VOIDED' && <Badge variant="destructive">Anulado</Badge>}
                   {movement.kind === 'CREDIT' && <Badge variant="muted">No suma</Badge>}
-                  <span className="font-medium">{paymentAmountText(movement)}</span>
+                  <span className="font-medium">
+                    <PaymentAmount payment={movement} />
+                  </span>
                 </div>
               </li>
             ))}

@@ -93,3 +93,7 @@ export function formatMoney(amount: string, currency: 'ARS' | 'USD' = 'ARS'): st
 export function countOf(count: number, singular: string, plural: string): string {
   return `${count} ${count === 1 ? singular : plural}`
 }
+
+export function formatLocalDate(iso: string): string {
+  return toDateText(new Date(iso))
+}
