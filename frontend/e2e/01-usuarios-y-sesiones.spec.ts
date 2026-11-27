@@ -147,7 +147,12 @@ test('el usuario dado de baja no puede volver a ingresar', async () => {
   await recepcion.screenshot({ path: captura('08-login-rechazado') })
 })
 
-test('el administrador puede cerrar sesión', async () => {
+test('el administrador puede reintentar un cierre de sesión fallido', async () => {
+  await admin.route('**/api/auth/logout', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'No se pudo cerrar sesión. Reintentá.', details: {} } }) }))
+  await admin.getByRole('button', { name: 'Cerrar sesión' }).click()
+  await expect(admin.getByText('No se pudo cerrar sesión. Reintentá.')).toBeVisible()
+  await expect(admin).not.toHaveURL(/\/login$/)
+  await admin.unroute('**/api/auth/logout')
   await admin.getByRole('button', { name: 'Cerrar sesión' }).click()
   await expect(admin).toHaveURL(/\/login$/)
 })

@@ -53,6 +53,7 @@ export class ApiError extends Error {
     readonly code: string,
     message: string,
     readonly details: unknown,
+    readonly sessionToken?: string | null,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -60,14 +61,25 @@ export class ApiError extends Error {
 }
 
 let csrfToken: string | null = null
+let sessionGeneration = 0
 
 export function setCsrfToken(token: string | null) {
+  if (csrfToken !== token) sessionGeneration++
   csrfToken = token
+}
+
+export function currentCsrfToken() {
+  return csrfToken
 }
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH'
 
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
+  const generation = sessionGeneration
+  const sessionToken = csrfToken
+  const assertCurrent = () => {
+    if (path !== '/api/setup/status' && generation !== sessionGeneration) throw new ApiError(409, 'STALE_SESSION', 'La sesión cambió durante la operación. Volvé a cargar la pantalla.', {}, sessionToken)
+  }
   const headers: Record<string, string> = {}
   const binary = body instanceof Blob
   if (body !== undefined) headers['Content-Type'] = binary ? 'application/octet-stream' : 'application/json'
@@ -79,9 +91,11 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
     body: body === undefined ? undefined : binary ? body : JSON.stringify(body),
     cache: 'no-store',
   })
+  assertCurrent()
   if (res.status === 204) return undefined as T
 
   const data: unknown = await res.json().catch(() => null)
+  assertCurrent()
   if (!res.ok) {
     const error = (data as { error?: { code?: string; message?: string; details?: unknown } } | null)?.error
     throw new ApiError(
@@ -89,6 +103,7 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
       error?.code ?? 'UNKNOWN',
       error?.message ?? 'Ocurrió un error inesperado',
       error?.details,
+      sessionToken,
     )
   }
   return data as T

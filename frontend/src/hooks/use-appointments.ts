@@ -1,6 +1,6 @@
 'use client'
 
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { pendingBillingKey } from '@/hooks/use-billing'
 import { api, type Appointment } from '@/lib/api'
 
@@ -22,7 +22,6 @@ export function useAppointments(filters: AppointmentFilters, enabled = true) {
   return useQuery({
     queryKey: [...appointmentsKey, filters],
     queryFn: () => api.get<Appointment[]>(`/api/appointments?${params.toString()}`),
-    placeholderData: keepPreviousData,
     enabled,
   })
 }

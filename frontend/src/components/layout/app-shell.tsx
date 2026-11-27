@@ -1,5 +1,7 @@
 'use client'
 
+import { FormError } from '@/components/form-error'
+import { sessionScope } from '@/lib/session-cache'
 import { LogOut, Menu, X } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -41,7 +43,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (isPending || !data || mustChange) return <LoadingBlock label="Cargando…" />
 
   return (
-    <Shell key={data.user.id} user={data.user} pathname={pathname} onLogout={() => logout.mutate()} loggingOut={logout.isPending}>
+    <Shell key={sessionScope(data.user)} user={data.user} pathname={pathname} onLogout={() => logout.mutate()} loggingOut={logout.isPending} logoutError={logout.error}>
       {children}
     </Shell>
   )
@@ -52,12 +54,14 @@ function Shell({
   pathname,
   onLogout,
   loggingOut,
+  logoutError,
   children,
 }: {
   user: SessionUser
   pathname: string
   onLogout: () => void
   loggingOut: boolean
+  logoutError: unknown
   children: ReactNode
 }) {
   const groups = visibleNav(user)
@@ -138,6 +142,7 @@ function Shell({
           </nav>
         )}
 
+        <FormError error={logoutError} className="mx-4 mt-3" />
         <main className={cn('mx-auto w-full flex-1 px-4 pb-24 pt-6', pathname.startsWith('/agenda') ? 'max-w-[110rem]' : 'max-w-5xl')}>{children}</main>
       </div>
       <TourHost key={pathname} user={user} pathname={pathname} />

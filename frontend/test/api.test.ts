@@ -63,3 +63,25 @@ describe('passwordProblems', () => {
     expect(passwordProblems(null)).toEqual([])
   })
 })
+
+it('asocia los errores al token de la petición y no al usuario conectado después', async () => {
+  let resolve!: (value: unknown) => void
+  vi.stubGlobal('fetch', () => new Promise((done) => { resolve = done }))
+  setCsrfToken('token-anterior')
+  const request = api.get('/api/private').catch((error: unknown) => error)
+  setCsrfToken('token-nuevo')
+  resolve({ status: 401, ok: false, json: async () => ({ error: { code: 'UNAUTHENTICATED', message: 'Sin sesión', details: {} } }) })
+  expect(await request).toMatchObject({ code: 'STALE_SESSION', sessionToken: 'token-anterior' })
+})
+
+it('rechaza también un éxito tardío para que una mutación anterior no repueble la caché', async () => {
+  let resolve!: (value: unknown) => void
+  const body = new Promise((done) => { resolve = done })
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 200, ok: true, json: () => body }))
+  setCsrfToken('token-anterior')
+  const request = api.put('/api/private', {}).catch((error: unknown) => error)
+  await Promise.resolve()
+  setCsrfToken('token-nuevo')
+  resolve({ private: 'datos anteriores' })
+  expect(await request).toMatchObject({ code: 'STALE_SESSION' })
+})
