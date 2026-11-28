@@ -10,6 +10,7 @@ import type { components } from '@/lib/api-types'
 
 const { replace, session } = vi.hoisted(() => ({ replace: vi.fn(), session: { user: {} as SessionUser } }))
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace }) }))
+vi.mock('@/hooks/use-organization', () => ({ useOrganization: () => ({ data: { settings: { reminders: { daysAhead: 1 } } }, isError: false, error: null }) }))
 vi.mock('@/hooks/use-session', () => ({ useSession: () => ({ data: session }) }))
 
 function mount(Page: typeof ImportPage, permissions: SessionUser['permissions']) {

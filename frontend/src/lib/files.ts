@@ -8,14 +8,16 @@ export const FILE_CATEGORY_LABELS: Record<ClinicalFile['category'], string> = {
   OTHER: 'Otro',
 }
 
-const MAX_FILE_MB = 20
-
 const ALLOWED = /\.(pdf|jpe?g|png)$/i
 
-export function fileProblem(file: Pick<File, 'name' | 'size'>): string | null {
+export function maxFileMb(organization: { settings: { files: { maxMb: number } }; limits: { fileMaxMb: number } }): number {
+  return Math.min(organization.settings.files.maxMb, organization.limits.fileMaxMb)
+}
+
+export function fileProblem(file: Pick<File, 'name' | 'size'>, maxMb: number | null): string | null {
   if (!ALLOWED.test(file.name)) return 'Solo se aceptan archivos PDF, JPG o PNG'
   if (file.size === 0) return 'El archivo está vacío'
-  if (file.size > MAX_FILE_MB * 1024 * 1024) return `El archivo supera los ${MAX_FILE_MB} MB`
+  if (maxMb !== null && file.size > maxMb * 1024 * 1024) return `El archivo supera los ${maxMb} MB`
   return null
 }
 
