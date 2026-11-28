@@ -6,16 +6,6 @@ test.describe.configure({ mode: 'serial' })
 const captura = (nombre: string) => `test-results/screens/${nombre}.png`
 const ADMIN = { username: ADMIN_USERNAME, password: ADMIN_PASSWORD }
 
-test.beforeAll(async () => {
-  const admin = await apiLogin(ADMIN_USERNAME, ADMIN_PASSWORD)
-  try {
-    const modules = await admin.put('/api/organization/modules', { coverages: true })
-    expect(modules.status()).toBe(200)
-    expect(await modules.json()).toEqual({ coverages: true })
-  } finally {
-    await admin.dispose()
-  }
-})
 
 async function ingresar(page: Page, usuario: { username: string; password: string }) {
   await page.goto('/login')
@@ -31,6 +21,17 @@ async function abrirFichaDeRossi(page: Page, pestania: string) {
   await page.getByRole('link', { name: 'Rossi, Luca' }).click()
   await page.getByRole('tab', { name: pestania }).click()
 }
+
+test('el administrador activa el módulo de coberturas y liquidaciones', async ({ page }) => {
+  await ingresar(page, ADMIN)
+  await expect(page.getByRole('link', { name: 'Coberturas' })).toHaveCount(0)
+  await page.goto('/settings')
+  await expect(page.getByLabel('Coberturas y liquidaciones')).not.toBeChecked()
+  await page.getByLabel('Coberturas y liquidaciones').click()
+  await expect(page.getByLabel('Coberturas y liquidaciones')).toBeChecked()
+  await expect(page.getByRole('link', { name: 'Coberturas' }).first()).toBeVisible()
+  await page.getByRole('region', { name: 'Consultorio: módulos' }).screenshot({ path: captura('44b-modulo-coberturas') })
+})
 
 test('recepción carga una prepaga con plan y convenio', async ({ page }) => {
   await ingresar(page, RECEPCION)

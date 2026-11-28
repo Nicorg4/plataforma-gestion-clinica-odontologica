@@ -1,21 +1,27 @@
 'use client'
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError, setCsrfToken, type SessionResponse } from '@/lib/api'
+import { api, ApiError, type SessionResponse } from '@/lib/api'
+import { acceptSession, forgetSession, sessionKey, sessionRevision } from '@/lib/session-cache'
 
-export const sessionKey = ['session'] as const
+export { sessionKey } from '@/lib/session-cache'
 
 export function useSession() {
+  const client = useQueryClient()
   return useQuery({
     queryKey: sessionKey,
     queryFn: async (): Promise<SessionResponse | null> => {
+      const revision = sessionRevision(client)
       try {
         const session = await api.get<SessionResponse>('/api/auth/me')
-        setCsrfToken(session.csrfToken)
+        if (revision !== sessionRevision(client)) return client.getQueryData<SessionResponse | null>(sessionKey) ?? null
+        await acceptSession(client, session)
         return session
       } catch (error) {
+        if (error instanceof ApiError && error.code === 'STALE_SESSION') return client.getQueryData<SessionResponse | null>(sessionKey) ?? null
         if (error instanceof ApiError && error.status === 401) {
-          setCsrfToken(null)
+          if (revision !== sessionRevision(client)) return client.getQueryData<SessionResponse | null>(sessionKey) ?? null
+          await forgetSession(client)
           return null
         }
         throw error
@@ -39,8 +45,8 @@ export function useLogin() {
   return useMutation({
     mutationFn: (input: { username: string; password: string }) =>
       api.post<SessionResponse>('/api/auth/login', input),
-    onSuccess: (session) => {
-      setCsrfToken(session.csrfToken)
+    onSuccess: async (session) => {
+      await acceptSession(client, session, true)
       client.setQueryData(sessionKey, session)
     },
   })
@@ -50,10 +56,9 @@ export function useLogout() {
   const client = useQueryClient()
   return useMutation({
     mutationFn: () => api.post('/api/auth/logout'),
-    onSettled: () => {
-      setCsrfToken(null)
-      client.clear()
-      client.setQueryData(sessionKey, null)
+    onSuccess: () => forgetSession(client),
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 401) return forgetSession(client)
     },
   })
 }

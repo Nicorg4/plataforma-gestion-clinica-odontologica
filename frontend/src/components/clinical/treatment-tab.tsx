@@ -16,7 +16,7 @@ import { usePractices } from '@/hooks/use-catalog'
 import { useAddItem, useCreatePlan, useItemAction, useTreatmentPlans } from '@/hooks/use-treatment'
 import type { TreatmentPlan } from '@/lib/api'
 import { isValidAmount, normalizeAmount } from '@/lib/billing'
-import { formatDate, formatMoney } from '@/lib/format'
+import { formatLocalDate, formatMoney } from '@/lib/format'
 import { SURFACE_LABELS, type Surface } from '@/lib/odontogram'
 import { isBillableItem, isOpenItem, itemLocation, itemStatusText, PLAN_STATUS_LABELS, TOOTH_OPTIONS } from '@/lib/treatment'
 
@@ -74,8 +74,8 @@ export function TreatmentTab({ patientId, canPlan, canPrice, canCancel, canBill,
               <div>
                 <h3 className="text-sm font-semibold">{plan.title ?? 'Plan de tratamiento'}</h3>
                 <p className="text-xs text-muted-foreground">
-                  {plan.professional.displayName} · {formatDate(plan.createdAt)}
-                  {plan.acceptedAt && ` · aceptado el ${formatDate(plan.acceptedAt)}`}
+                  {plan.professional.displayName} · {formatLocalDate(plan.createdAt)}
+                  {plan.acceptedAt && ` · aceptado el ${formatLocalDate(plan.acceptedAt)}`}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -153,7 +153,7 @@ export function TreatmentTab({ patientId, canPlan, canPrice, canCancel, canBill,
                 ))}
               </ul>
             )}
-            {!archived && (plan.status === 'DRAFT' || plan.status === 'ACCEPTED') && (
+            {!archived && (plan.status === 'DRAFT' || plan.status === 'ACCEPTED') && (canPlan || (canPrice && plan.status === 'DRAFT')) && (
               <footer className="flex flex-wrap justify-end gap-2 border-t px-4 py-3">
                 {canPlan && (
                   <Button variant="outline" size="sm" onClick={() => setAdding(plan.id)}>

@@ -89,3 +89,11 @@ export function parseDateTimeText(dateText: string, timeText: string): Date | nu
 export function formatMoney(amount: string, currency: 'ARS' | 'USD' = 'ARS'): string {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency }).format(Number(amount))
 }
+
+export function countOf(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`
+}
+
+export function formatLocalDate(iso: string): string {
+  return toDateText(new Date(iso))
+}

@@ -4,12 +4,13 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@ta
 import { useState, type ReactNode } from 'react'
 import { ThemeSync } from '@/components/theme-sync'
 import { sessionKey } from '@/hooks/use-session'
-import { ApiError, setCsrfToken } from '@/lib/api'
+import { forgetSession } from '@/lib/session-cache'
+import { ApiError, currentCsrfToken } from '@/lib/api'
 
 function handleSessionLoss(client: QueryClient, error: unknown) {
+  if (error instanceof ApiError && error.sessionToken !== undefined && error.sessionToken !== currentCsrfToken()) return
   if (error instanceof ApiError && error.status === 401) {
-    setCsrfToken(null)
-    client.setQueryData(sessionKey, null)
+    void forgetSession(client)
   }
   if (error instanceof ApiError && error.code === 'PASSWORD_CHANGE_REQUIRED') {
     void client.invalidateQueries({ queryKey: sessionKey })

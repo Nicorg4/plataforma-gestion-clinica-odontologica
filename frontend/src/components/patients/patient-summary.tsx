@@ -5,7 +5,7 @@ import { useAppointments } from '@/hooks/use-appointments'
 import { useAccount, useServices } from '@/hooks/use-billing'
 import { useClinicalEntries } from '@/hooks/use-clinical'
 import type { Patient, SessionUser } from '@/lib/api'
-import { documentLabel, formatDate, formatDateTime, formatMoney } from '@/lib/format'
+import { documentLabel, formatDate, formatDateTime, formatLocalDate, formatMoney } from '@/lib/format'
 import { can } from '@/lib/permissions'
 import { PatientCoverageCard } from './patient-coverage-card'
 import { PatientNotes } from './patient-notes'
@@ -21,7 +21,9 @@ export function PatientSummary({ patient, user }: Props) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <PatientNotes patientId={patient.id} canWrite={can(user, 'patient-notes:write') && patient.archivedAt === null} />
-      <PatientCoverageCard patientId={patient.id} canWrite={can(user, 'patients:write') && patient.archivedAt === null} />
+      {user.modules.coverages && (
+        <PatientCoverageCard patientId={patient.id} canWrite={can(user, 'patients:write') && patient.archivedAt === null} />
+      )}
       {can(user, 'appointments:read') && <NextAppointment patientId={patient.id} />}
       {can(user, 'account:read') && <Balance patientId={patient.id} />}
       {can(user, 'clinical:read') && <LastEvolution patientId={patient.id} />}
@@ -33,7 +35,7 @@ export function PatientSummary({ patient, user }: Props) {
           <Item label="Teléfono" value={patient.phone} />
           <Item label="Email" value={patient.email} />
           <Item label="Dirección" value={patient.address} />
-          <Item label="Alta en el sistema" value={formatDate(patient.createdAt)} />
+          <Item label="Alta en el sistema" value={formatLocalDate(patient.createdAt)} />
         </dl>
       </Card>
     </div>
@@ -125,7 +127,7 @@ function LastServices({ patientId }: { patientId: string }) {
           {recent.map((service) => (
             <li key={service.id}>
               {service.practice.name}
-              <span className="text-xs text-muted-foreground"> · {formatDate(service.performedAt)}</span>
+              <span className="text-xs text-muted-foreground"> · {formatLocalDate(service.performedAt)}</span>
             </li>
           ))}
         </ul>

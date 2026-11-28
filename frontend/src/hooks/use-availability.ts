@@ -1,6 +1,6 @@
 'use client'
 
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type AgendaAvailability, type AvailabilityExceptionResult, type ProfessionalAvailability } from '@/lib/api'
 
 const availabilityKey = ['availability'] as const
@@ -21,7 +21,6 @@ export function useAgendaAvailability(
   return useQuery({
     queryKey: [...availabilityKey, 'agenda', filters],
     queryFn: () => api.get<AgendaAvailability>(`/api/availability?${params.toString()}`),
-    placeholderData: keepPreviousData,
     enabled,
   })
 }

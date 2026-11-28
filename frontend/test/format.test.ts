@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ageFrom, documentLabel, formatDate, formatDocumentNumber, fullName } from '@/lib/format'
+import { ageFrom, countOf, documentLabel, formatDate, formatDocumentNumber, formatLocalDate, fullName } from '@/lib/format'
 
 describe('ageFrom', () => {
   const hoy = new Date(2026, 9, 2)
@@ -22,6 +22,20 @@ describe('formatDate', () => {
   it('muestra dd/mm/aaaa', () => {
     expect(formatDate('1985-03-10')).toBe('10/03/1985')
     expect(formatDate('2026-10-02T14:30:00.000Z')).toBe('02/10/2026')
+  })
+
+  it('un instante se muestra con la fecha local, no la de UTC', () => {
+    process.env['TZ'] = 'America/Argentina/Buenos_Aires'
+    expect(formatLocalDate('2026-11-03T01:30:00.000Z')).toBe('02/11/2026')
+    expect(formatLocalDate('2026-11-02T14:30:00.000Z')).toBe('02/11/2026')
+  })
+})
+
+describe('cantidades', () => {
+  it('usa el singular solo para uno', () => {
+    expect(countOf(1, 'prestación', 'prestaciones')).toBe('1 prestación')
+    expect(countOf(0, 'prestación', 'prestaciones')).toBe('0 prestaciones')
+    expect(countOf(2000, 'paciente', 'pacientes')).toBe('2000 pacientes')
   })
 })
 

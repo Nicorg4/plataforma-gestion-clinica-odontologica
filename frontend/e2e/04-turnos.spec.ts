@@ -75,6 +75,18 @@ test('el sistema no deja crear un turno que se pisa con otro del mismo profesion
   await dialogo.getByRole('button', { name: 'Cancelar' }).click()
 })
 
+test('cerrar el calendario con Escape no cierra el formulario del turno', async () => {
+  const dialogo = await nuevoTurno(page, manana(16))
+  await dialogo.getByRole('button', { name: 'Elegir en el calendario' }).click()
+  const calendario = page.getByRole('dialog', { name: 'Calendario' })
+  await expect(calendario).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(calendario).toHaveCount(0)
+  await expect(dialogo.getByLabel('Hora', { exact: true })).toHaveValue('16:00')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
 test('reprograma el turno, lo confirma y lo cancela con motivo', async () => {
   const proximos = page.getByRole('region', { name: 'Próximos turnos' })
 

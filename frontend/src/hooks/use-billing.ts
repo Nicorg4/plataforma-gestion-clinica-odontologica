@@ -130,9 +130,10 @@ export function useSetExchangeRate() {
   })
 }
 
-export function useCashDay(date: string) {
+export function useCashDay(date: string, enabled: boolean) {
   return useQuery({
     queryKey: [...cashKey, date],
     queryFn: () => api.get<CashDay>(`/api/cash?date=${date}`),
+    enabled,
   })
 }
