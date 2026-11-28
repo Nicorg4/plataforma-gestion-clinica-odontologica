@@ -42,6 +42,11 @@ const TOURS: Tour[] = [
         permission: 'patients:read',
       },
       {
+        target: 'quick-actions',
+        title: 'Accesos rápidos',
+        text: 'Arriba tenés accesos según tus permisos: dar un turno, cargar un paciente o abrir la ficha de tu próximo paciente. El buscador sigue disponible.',
+      },
+      {
         target: 'user',
         title: 'Tu usuario',
         text: 'Tu nombre y tus roles. Con Salir cerrás la sesión; hacelo siempre en una computadora compartida.',
@@ -54,7 +59,7 @@ const TOURS: Tour[] = [
       {
         target: 'help',
         title: 'Ayuda',
-        text: 'Cada pantalla tiene su propio recorrido, que aparece la primera vez que entrás. Con este botón lo repetís cuando quieras.',
+        text: 'Cada pantalla tiene su propio recorrido, que aparece la primera vez que entrás. Desde Ayuda, en el menú, lo repetís cuando quieras.',
       },
     ],
   },

@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { FormError } from '@/components/form-error'
 import { CircleHelp } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { GuidedTour, visibleSteps } from '@/components/layout/guided-tour'
 import { useSavePreferences } from '@/hooks/use-preferences'
 import { sessionKey } from '@/hooks/use-session'
@@ -17,7 +17,9 @@ interface Running {
   steps: TourStep[]
 }
 
-export function TourHost({ user, pathname }: { user: SessionUser; pathname: string }) {
+const ToursContext = createContext<{ pageTour: string | null; start: (id: string) => void } | null>(null)
+
+export function TourHost({ user, pathname, children }: { user: SessionUser; pathname: string; children?: ReactNode }) {
   const client = useQueryClient()
   const savePreferences = useSavePreferences()
   const completeOnboarding = useMutation({
@@ -28,7 +30,6 @@ export function TourHost({ user, pathname }: { user: SessionUser; pathname: stri
     },
   })
   const [running, setRunning] = useState<Running | null>(null)
-  const [menuOpen, setMenuOpen] = useState(false)
   const handled = useRef(new Set<string>())
   const pageTour = tourForPath(pathname)
   const seen = user.preferences.toursSeen
@@ -63,49 +64,33 @@ export function TourHost({ user, pathname }: { user: SessionUser; pathname: stri
   }
 
   return (
-    <>
-      <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2" style={{ marginBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-        {menuOpen && (
-          <div role="menu" aria-label="Ayuda" className="w-60 rounded-lg border bg-card p-1 shadow-lg">
-            {pageTour && (
-              <button
-                type="button"
-                role="menuitem"
-                className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-                onClick={() => {
-                  setMenuOpen(false)
-                  start(pageTour)
-                }}
-              >
-                Recorrido de esta pantalla ({tourTitle(pageTour)})
-              </button>
-            )}
-            <button
-              type="button"
-              role="menuitem"
-              className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
-              onClick={() => {
-                setMenuOpen(false)
-                start(ONBOARDING_TOUR)
-              }}
-            >
-              Recorrido general del sistema
-            </button>
-          </div>
-        )}
-        <button
-          type="button"
-          data-tour="help"
-          aria-label="Ayuda"
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((open) => !open)}
-          className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring motion-reduce:transition-none"
-        >
-          <CircleHelp className="size-6" aria-hidden />
-        </button>
-      </div>
+    <ToursContext.Provider value={{ pageTour, start }}>
+      {children}
       {running && <GuidedTour title={tourTitle(running.id)} steps={running.steps} onClose={finish} pending={completeOnboarding.isPending || savePreferences.isPending} error={<FormError error={completeOnboarding.error ?? savePreferences.error} />} />}
-    </>
+    </ToursContext.Provider>
+  )
+}
+
+export function HelpMenu({ onPick }: { onPick?: () => void }) {
+  const tours = useContext(ToursContext)
+  const [menuOpen, setMenuOpen] = useState(false)
+  if (!tours) return null
+  const pick = (id: string) => {
+    setMenuOpen(false)
+    onPick?.()
+    window.requestAnimationFrame(() => tours.start(id))
+  }
+  return (
+    <div data-tour="help">
+      <button type="button" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
+        <CircleHelp className="size-4" aria-hidden /> Ayuda
+      </button>
+      {menuOpen && (
+        <ul aria-label="Recorridos guiados" className="ml-4 mt-1 space-y-1 border-l pl-3">
+          {tours.pageTour && <li><button type="button" className="px-2 py-1 text-left text-sm hover:bg-muted" onClick={() => pick(tours.pageTour!)}>Recorrido de esta pantalla ({tourTitle(tours.pageTour)})</button></li>}
+          <li><button type="button" className="px-2 py-1 text-left text-sm hover:bg-muted" onClick={() => pick(ONBOARDING_TOUR)}>Recorrido general del sistema</button></li>
+        </ul>
+      )}
+    </div>
   )
 }
